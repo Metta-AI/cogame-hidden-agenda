@@ -117,6 +117,55 @@ block replayPacketDrivesTheSameChrome:
   let final = parseJson(buildReplayPacket(replay, viewer))
   check(final{"hud"}{"over"} != nil, "jumping to the end shows the endcard")
 
+block bothCountdownsAreDerivedFromTheBytes:
+  ## The impostor plate draws a freeze-cooldown pip bar and the vote board a
+  ## `RESOLVES IN n`; neither quantity is in the frame encoding. The static
+  ## bundle reported 0 for both, so the pips read fully charged the instant
+  ## after a freeze and the vote board read `RESOLVED` for the whole meeting.
+  ## Both are exact functions of the recorded rows plus the recorded config.
+  let replay = parseReplay(replayBytes(game))
+
+  var freezeTick = -1
+  var meetingTick = -1
+  for row in game.log.rows:
+    if row{"k"}.getStr() == "freeze" and freezeTick < 0:
+      freezeTick = row{"t"}.getInt()
+    if row{"k"}.getStr() == "meeting" and meetingTick < 0:
+      meetingTick = row{"t"}.getInt()
+  check(freezeTick >= 0, "this fixture must contain a freeze")
+  check(meetingTick >= 0, "and a meeting")
+
+  proc chromeAt(tick: int): ViewChrome =
+    var viewer = initGlobalViewerState()
+    viewer.playback.seek(replay, tick)
+    replayChrome(replay, viewer, tick)
+
+  ## Before the first freeze the beam is ready and the bar is empty.
+  check(chromeAt(freezeTick - 1).freezeCooldown == 0,
+    "no freeze yet means no cooldown")
+  ## On the freeze tick it is the full cooldown, then it decays one per tick.
+  let atFreeze = chromeAt(freezeTick)
+  check(atFreeze.freezeCooldown == game.config.freezeCooldownTicks,
+    "the tick of a freeze reads the full cooldown, got " &
+    $atFreeze.freezeCooldown)
+  check(atFreeze.freezeCooldownTicks == game.config.freezeCooldownTicks,
+    "and the total the pip bar divides by")
+  let laterTick = min(freezeTick + 10, replay.maxTick())
+  check(chromeAt(laterTick).freezeCooldown ==
+        game.config.freezeCooldownTicks - (laterTick - freezeTick),
+    "and it decays one per tick, exactly as the sim decrements it")
+
+  ## The meeting countdown runs from the meeting row to resolveTick.
+  check(chromeAt(meetingTick).meetingIn == game.config.resolveTick,
+    "the vote board opens at RESOLVES IN resolveTick, got " &
+    $chromeAt(meetingTick).meetingIn)
+  let midMeeting = meetingTick + game.config.revealTick
+  check(chromeAt(midMeeting).meetingIn ==
+        game.config.resolveTick - game.config.revealTick,
+    "and counts down while the meeting runs")
+  check(chromeAt(meetingTick + game.config.resolveTick).meetingIn == 0,
+    "and reaches 0 on the resolve tick, which is when it reads RESOLVED")
+
 block feedRowsAreCapped:
   ## Every string that can reach a feed row is capped at its declared length.
   for row in game.log.rows:

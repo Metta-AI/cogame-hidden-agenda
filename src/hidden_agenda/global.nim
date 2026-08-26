@@ -244,11 +244,9 @@ proc replayChrome*(replay: Replay, state: GlobalViewerState,
       crew.inc
   result.activeCrew = crew
   result.impostorSlot = impostor
-  result.freezeCooldown = 0
   result.freezeCooldownTicks = replay.config.freezeCooldownTicks
   result.meetingNumber = 0
   result.meetingCause = "cadence"
-  result.meetingIn = 0
   result.lead = replay.race
   result.lulls = replay.lullSpans()
   result.beats = replay.beats
@@ -257,9 +255,20 @@ proc replayChrome*(replay: Replay, state: GlobalViewerState,
   result.events = replay.eventsAt(fromTick, tick)
   ## The meeting readout comes from the events already played: the vote board
   ## reads `m.votes` / `m.tally` / `m.phase` and `phase` rides the frame.
+  ##
+  ## The two COUNTDOWNS ride the same walk. The impostor plate draws a
+  ## freeze-cooldown pip bar and the vote board a `RESOLVES IN n`; neither
+  ## quantity is in the frame encoding, and reporting 0 for both left the pip
+  ## bar permanently full and the vote board permanently reading `RESOLVED`.
+  ## Both are exact functions of the recorded rows and the recorded config:
+  ## `sim.nim` sets the cooldown to `freezeCooldownTicks` at the freeze tick
+  ## and decrements it once per tick from the next one (step 1), and a meeting
+  ## resolves `resolveTick` ticks after the `meeting` row's tick.
   var votes: array[Seats, string]
   var meetingNumber = 0
   var cause = "cadence"
+  var lastFreezeTick = -1
+  var meetingOpenTick = -1
   for t in 0 .. tick:
     if not replay.eventsByTick.hasKey(t):
       continue
@@ -268,8 +277,11 @@ proc replayChrome*(replay: Replay, state: GlobalViewerState,
       of "meeting":
         meetingNumber = node{"n"}.getInt()
         cause = node{"cause"}.getStr()
+        meetingOpenTick = t
         for slot in 0 ..< Seats:
           votes[slot] = ""
+      of "freeze":
+        lastFreezeTick = t
       of "vote":
         let slot = node{"seat"}.getInt()
         if slot >= 0 and slot < Seats:
@@ -280,6 +292,14 @@ proc replayChrome*(replay: Replay, state: GlobalViewerState,
         discard
   result.meetingNumber = meetingNumber
   result.meetingCause = cause
+  result.freezeCooldown =
+    if lastFreezeTick < 0: 0
+    else: max(0, replay.config.freezeCooldownTicks - (tick - lastFreezeTick))
+  result.meetingIn =
+    if frame.meetingPhase != 0 and meetingOpenTick >= 0:
+      max(0, replay.config.resolveTick - (tick - meetingOpenTick))
+    else:
+      0
   if frame.meetingPhase == 0:
     for slot in 0 ..< Seats:
       votes[slot] = ""
