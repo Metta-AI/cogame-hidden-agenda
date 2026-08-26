@@ -136,6 +136,14 @@
 
   function renderSublines(s) {
     var a = agenda(s);
+    // The plate HEADLINES are the two sides of this game, not the policies
+    // seated on them: with four different crew policies the inherited
+    // teamName() headline is unreadable, and on the impostor plate it reads
+    // the one policy name twice (headline and subline). Both name spaces are
+    // still on screen -- the roster strip, the impostor subline and the
+    // endcard's role table all carry the policy names.
+    CTX.C.setName('name-crew', 'CREW');
+    CTX.C.setName('name-impostor', 'IMPOSTOR');
     var crew = subline('crew');
     var impostor = subline('impostor');
     if (crew) {
