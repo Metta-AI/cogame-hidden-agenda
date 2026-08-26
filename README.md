@@ -79,9 +79,13 @@ python3 scripts/art/split_cog_sheet.py data/art       # nano-banana cog kits
 python3 tools/build_page.py                           # client/replay_broadcast.html
 ```
 
-`tools/build_page.py` is what keeps the chrome honest: it takes the STARTER's
-`client/replay_broadcast.html` (coworld-ctf), asserts the exact blocks it
-removes, and appends this game's CSS, markup and script under a banner comment.
+`tools/build_page.py` is what keeps the chrome honest: the page IS the
+STARTER's `client/replay_broadcast.html` (coworld-ctf) — its CSS, its body
+markup **and its page script** — with this game's block appended under a banner
+comment. The builder asserts every block it removes (the first-person PiP, the
+zoom bar + minimap, the POV badge, the hash-mismatch warning) line by line, so a
+starter bump fails loudly instead of cutting the wrong thing, and
+`tests/test_broadcast.nim` re-checks the inherited script function by function.
 A page written from scratch that reuses the starter's ids is a rewrite.
 
 ## CI is the harness

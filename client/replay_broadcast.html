@@ -1126,6 +1126,1270 @@ body[data-embed] #grain,
 body[data-embed] #status { display: none !important; }
 body[data-embed] #board { top: 0; height: 100%; }
 
+</style>
+</head>
+<body>
+<div id="viewport">
+<div id="stage">
+  <canvas id="board"></canvas>
+  <div id="lightpool"></div>
+  <div id="grain" class="amb"></div>
+
+  <!-- Pre-load curtain: the station airlock. The art frames (srcs set by
+       the appended game block) are five station portraits; the whole
+       scene fades out on the first ingested
+       frame (dismissLockerRoom). role=status so screen readers hear one
+       "Loading replay" while the crew seals up. -->
+  <div id="lockerroom" role="status" aria-label="Loading replay">
+    <div class="lk-art" id="lk-art" aria-hidden="true">
+      <img class="lk-bg" id="lk-bg" alt="">
+      <div class="lk-sprites" id="lk-sprites"></div>
+    </div>
+    <div class="lk-glow" aria-hidden="true"></div>
+    <div class="lk-cap" id="lk-cap" aria-hidden="true">Sealing the airlock&hellip;</div>
+    <div class="lk-bar" aria-hidden="true"><i></i></div>
+    <div class="lk-sub">Station airlock &middot; Loading replay</div>
+  </div>
+
+  <div id="chrome">
+    <!-- Plates are generated per active team (2-4) by ensureScorebug(): one
+         per side for classic red/blue, two stacked per side for 3-4 teams.
+         Each plate holds a flag icon, one inline NAME · Lives · count row
+         (mirrored on the right so names flank the clock), and the squad pip
+         strip (one pip per player: alive / down / eliminated; clickable →
+         POV lens). -->
+    <div id="scorebug">
+      <div class="plates" id="plates-l"></div>
+
+      <div class="clock-col">
+        <div class="clock amb" id="clock">
+          <div class="time" id="clock-time">0:00</div>
+          <span class="ffwd-mini" id="ffwd-mini">▸▸</span>
+          <div class="caption" id="clock-caption">Sealing the airlock</div>
+        </div>
+      </div>
+
+      <div class="plates" id="plates-r"></div>
+    </div>
+
+
+
+    <!-- HIDDEN-AGENDA additions to the inherited coworld-ctf chrome -->
+    <!-- The roster strip (spectator-side role reveal) and the vote board.
+         Both are absolutely positioned inside #chrome and clipped to the board
+         region between --topband and --band; neither sits in the transport
+         band. -->
+    <div id="rosterstrip"></div>
+    <div id="voteboard">
+      <div id="vb-head">MEETING</div>
+      <div id="vb-rows"></div>
+      <div id="vb-count">RESOLVES IN &mdash;</div>
+    </div>
+
+    <div id="bannerlane"></div>
+    <div id="killfeed"></div>
+
+    <div id="transport">
+      <!-- Buttons on top, scrubber/timeline below (the transport sits in its own
+           reserved band under the board, so nothing here overlaps play). -->
+      <div class="tbar">
+        <button class="tbtn" id="btn-restart" title="Restart (,)">⟲</button>
+        <button class="tbtn" id="btn-back" title="Back one tick (b)">◂|</button>
+        <button class="tbtn" id="btn-play" title="Play / pause (space)">▶</button>
+        <button class="tbtn" id="btn-fwd" title="Skip +5s (.)">+5s</button>
+        <button class="tbtn" id="btn-end" title="Jump to end (e)">|▸</button>
+        <button class="tbtn" id="btn-loop" title="Loop (r)">↻</button>
+        <button class="tbtn" id="btn-skip" title="Auto-skip lulls (f)">▸▸</button>
+        <button class="tbtn" id="btn-spoilers" title="Spoilers: meetings / freezes / ejections / winner on the timeline ahead of the playhead (o)">spoilers</button>
+        <span class="ffwd-chip" id="ffwd-chip">▸▸ SKIPPING LULL</span>
+        <span class="win-chip" id="win-chip"></span>
+        <span class="tick-clock" id="tick-clock">0 / 0</span>
+        <span class="tsep"></span>
+        <div class="speedchips" id="speedchips"></div>
+      </div>
+      <div class="scrub" id="scrub">
+        <!-- momentum graph sits UNDERNEATH the seek track, on the SAME tick/mx
+             axis, so the playhead crosses it 1:1 with the timeline -->
+        <svg class="momentum" id="momentum" viewBox="0 0 1000 100"
+             preserveAspectRatio="none" aria-hidden="true"></svg>
+        <span class="momentum-label">RACE TO WIN</span>
+        <div class="scrub-track"></div>
+        <div class="scrub-fill" id="scrub-fill"></div>
+        <!-- lull shading rides ABOVE track+fill so the quiet stretches read
+             dimmed whether played or not; the amber head still wins (z:3) -->
+        <div id="lulls"></div>
+        <div class="scrub-win" id="scrub-win"></div>
+        <div class="scrub-head" id="scrub-head"></div>
+      </div>
+    </div>
+
+    <div id="endcard">
+      <div class="headline" id="ec-headline">—</div>
+      <div class="wincond" id="ec-wincond"></div>
+      <div class="how" id="ec-how"></div>
+      <!-- HIDDEN-AGENDA additions to the inherited coworld-ctf chrome: the role reveal table. -->
+      <div id="ec-roles"></div>
+      <!-- One stats panel per active team, generated by ensureEndcardTeams(). -->
+      <div class="ec-teams" id="ec-teams"></div>
+      <div class="ec-replay" id="ec-replay"></div>
+    </div>
+  </div>
+
+  <div id="status">connecting</div>
+</div>
+</div>
+
+<!-- WIRE_CONSTANTS -->
+<!-- CHROME_COMMON -->
+<!-- BROADCAST_CORE -->
+
+<script>
+(function () {
+  'use strict';
+
+  // Shared replay chrome (chrome_common.js, spliced over the CHROME_COMMON
+  // marker by the server / dist bundle; the literal marker must not appear
+  // inside this script or the splice would corrupt it). A raw file:// open of
+  // this source has no splice — same non-functional baseline as the missing
+  // BROADCAST_CORE — so fail loud and early instead of throwing mid-file.
+  if (!window.ChromeCommon) {
+    console.error('replay_broadcast: chrome_common.js missing — this page must be served spliced (native server or dist bundle), not opened raw.');
+    return;
+  }
+  var C = window.ChromeCommon({
+    send: function (cmd) { send(cmd); },
+    sendPov: function (slot) { send('v:' + slot); },
+    getState: function () { return lastState; }
+  });
+  // Aliases so the per-view code below reads exactly as before.
+  var RED = C.RED, BLUE = C.BLUE, AMBER = C.AMBER, PAPER = C.PAPER;
+  var GREEN = C.GREEN, YELLOW = C.YELLOW;
+  var TEAM_ORDER = C.TEAM_ORDER, TEAM_COLOR = C.TEAM_COLOR;
+  var teamCol = C.teamCol, activeTeams = C.activeTeams, teamOf = C.teamOf;
+  var otherTeam = C.otherTeam, stripSeatSuffix = C.stripSeatSuffix;
+  var teamPolicies = C.teamPolicies, teamName = C.teamName, teamHeadline = C.teamHeadline;
+  var rosterName = C.rosterName, setName = C.setName, esc = C.esc, fmt = C.fmt;
+  var setHandicap = C.setHandicap;
+  var teamPerkGroups = C.teamPerkGroups, perkIconsHtml = C.perkIconsHtml;
+  var togglePov = C.togglePov, renderClock = C.renderClock, renderTransport = C.renderTransport;
+  var ingestLullSpans = C.ingestLullSpans, renderLullSpans = C.renderLullSpans;
+  var markBeat = C.markBeat, killMarkerTeam = C.killMarkerTeam, renderBeatMarkers = C.renderBeatMarkers;
+  var captureTeam = C.captureTeam, ingestBeats = C.ingestBeats, setVerdict = C.setVerdict;
+  var ingestLeadSeries = C.ingestLeadSeries, recordMomentum = C.recordMomentum;
+  var renderMomentum = C.renderMomentum;
+  var getSpoilers = C.getSpoilers, setSpoilers = C.setSpoilers;
+
+  // Engine-authoritative wire constants (read via the shared chrome; the
+  // fallback literals for raw file:// opens live in chrome_common.js).
+  var WIRE = C.WIRE, SPEEDS = C.SPEEDS, FPS = C.FPS;
+
+  // Two independent tempo levers (§11, L20):
+  //  (1) ANIM_MAX_FACTOR — chrome beat animations never play faster than this
+  //      no matter the replay speed, so feed rows / flips / banners keep their
+  //      read time at 8-16×. Applied as an animationFactor cap on durations.
+  //  (2) DWELL_FLOOR_MS — a beat's on-screen hold has a wall-clock minimum
+  //      (feed row / banner / curtain), collapsing only the dead time between
+  //      contacts. These are NOT one speed knob — one caps motion, one floors dwell.
+  var ANIM_MAX_FACTOR = 2;
+  var DWELL_FLOOR_MS = { feed: 2600, banner: 1900, curtain: 2400, read: 600 };
+  function animFactor() {
+    // Lever 1 — the chrome plays at min(replaySpeed, cap): at 16× the board flies
+    // but a kill row still slides in at 2×-equivalent so a human can read it.
+    var sp = (lastState && lastState.sp) || 1;
+    return Math.min(sp, ANIM_MAX_FACTOR);
+  }
+  function dwellFloor(kind) {
+    // Lever 2 — a beat's on-screen hold has a wall-clock minimum regardless of
+    // replay speed; speed collapses only the dead time between contacts, never
+    // the read time of a beat itself. Independent of the animFactor cap.
+    return DWELL_FLOOR_MS[kind] || DWELL_FLOOR_MS.read;
+  }
+  // Beat-pause (§11): freeze chrome ambient the instant a beat lands so idle
+  // life never competes with a kill/steal/capture. Held for the READ_PAUSE floor
+  // (≥600ms wall-clock), then released. The board's own 24Hz is never touched.
+  var beatPulseTimer = null;
+  function beatPulse() {
+    stage.classList.add('beat-active');
+    if (beatPulseTimer) clearTimeout(beatPulseTimer);
+    beatPulseTimer = setTimeout(function () {
+      stage.classList.remove('beat-active');
+      beatPulseTimer = null;
+    }, dwellFloor('read'));
+  }
+
+  var $ = C.$;
+  var viewport = $('viewport');
+  var stage = $('stage');
+  var canvas = $('board');
+  var statusEl = $('status');
+
+  // ---- pre-load curtain: the station airlock -------------------------------
+  // The stage opens on this scene (see #lockerroom CSS) while the wasm sim
+  // boots. The art frames are wired by the APPENDED game block (this game's
+  // curtain is five station portraits, so the starter's CTF pose-sheet
+  // geometry does not survive); the first ingested frame calls
+  // dismissLockerRoom(), which fades the room out after a short minimum dwell
+  // (a sub-second load would otherwise flash the scene like a glitch).
+  var lockerEl = $('lockerroom');
+  var LOCKER_MIN_DWELL_MS = 900;
+  var lockerShownAt = Date.now();
+  var lockerCapTimer = null, lockerGone = false;
+  function dismissLockerRoom() {
+    if (lockerGone) return;
+    lockerGone = true;
+    var wait = Math.max(0, LOCKER_MIN_DWELL_MS - (Date.now() - lockerShownAt));
+    setTimeout(function () {
+      lockerEl.classList.add('gone');
+      setTimeout(function () {
+        lockerEl.style.display = 'none';
+        if (lockerCapTimer) { clearInterval(lockerCapTimer); lockerCapTimer = null; }
+      }, 650);
+    }, wait);
+  }
+
+  // ---- embed mode (League Replayer) ----------------------------------------
+  // When loaded inside the League Replayer shell (?embed=1), this client renders
+  // ONLY the board (its own scorebug/transport/feed chrome is hidden by CSS via
+  // body[data-embed]) and streams each parsed state frame up to the parent shell
+  // over postMessage. The shell owns the walls + scorebug + KDA + standings and
+  // draws them from this stream, so there is ONE websocket / ONE transport /
+  // perfect tick-sync between the embedded game and the wall HUD.
+  var EMBED = false;
+  try { EMBED = new URLSearchParams(location.search).get('embed') === '1'; } catch (e) {}
+  if (EMBED) document.body.setAttribute('data-embed', '1');
+
+  // Tick deep-link (?t=<tick>): seek there on load, paused, via the same s:
+  // command the scrubber uses (the sim clamps out-of-range ticks). One-shot,
+  // fired on the first ingested frame so the replay runtime is ready.
+  var SEEK_T = null;
+  try {
+    var seekRaw = new URLSearchParams(location.search).get('t');
+    if (seekRaw != null && /^\d+$/.test(seekRaw)) SEEK_T = parseInt(seekRaw, 10);
+  } catch (e) {}
+
+  // Achievement deep-link (?achievement=<id>): a badge's watch link. The lead
+  // chrome frame carries the final game's earned badges with their focus cogs
+  // (s.ach: [{id, s, n}]); when it arrives, select the receiving cog's POV via
+  // the same v: command a squad-pip click sends. One-shot: once applied (or the
+  // id turns out unearned in this recording) the param goes inert, so the
+  // viewer is free to click elsewhere.
+  var ACH_FOCUS = null;
+  try {
+    var achRaw = new URLSearchParams(location.search).get('achievement');
+    if (achRaw) ACH_FOCUS = achRaw;
+  } catch (e) {}
+  function applyAchievementFocus(s) {
+    if (ACH_FOCUS == null || !s.ach) return;
+    var want = ACH_FOCUS;
+    ACH_FOCUS = null;             // the lead frame ships once; so does this
+    for (var i = 0; i < s.ach.length; i++) {
+      if (s.ach[i].id === want && s.ach[i].s != null && s.ach[i].s >= 0) {
+        send('v:' + s.ach[i].s);
+        return;
+      }
+    }
+  }
+  function postToShell(type, payload) {
+    if (!EMBED || window.parent === window) return;
+    try { window.parent.postMessage({ src: 'ctf-replay', type: type, data: payload }, '*'); } catch (e) {}
+  }
+
+  // The whole replay is ONE fixed-aspect composition locked to the board's
+  // native size. The stage is sized to this aspect inside the embed box and
+  // every overlay scales with it, so the chrome can never drift off the
+  // graphics regardless of the Observatory container's shape
+  // (§2 real-container-target, L82 bounded-embed).
+  //
+  // These are PRE-STREAM DEFAULTS ONLY (the classic arena's 1235×659). The game
+  // serves many map shapes — a four-team board is SQUARE (2496² / 4992²) — so
+  // the real native size arrives on every frame and syncBoardAspect re-layouts
+  // the stage when it differs. Leaving them hard-coded pillarboxes a square
+  // board inside a 1.874:1 stage with dead bands either side.
+  var BOARD_W = 1235, BOARD_H = 659;
+  var BOARD_ASPECT = BOARD_W / BOARD_H;
+  function syncBoardAspect(s) {
+    if (!s || !(s.boardW > 1) || !(s.boardH > 1)) return;
+    var aspect = s.boardW / s.boardH;
+    if (Math.abs(aspect - BOARD_ASPECT) < 0.001) return;
+    BOARD_W = s.boardW; BOARD_H = s.boardH; BOARD_ASPECT = aspect;
+    relayout();
+  }
+
+  // ---- flag icon svg (HOME/TAKEN/CAPTURED — F2; captured draws as taken) ----
+  function buildFlag(el, color) {
+    el.innerHTML =
+      '<svg viewBox="0 0 26 30" aria-hidden="true">' +
+      '<rect x="4" y="2" width="2" height="26" fill="#2a1f16"/>' +
+      '<g class="cloth"><path d="M6 3 L22 3 L18 9 L22 15 L6 15 Z" fill="' + color + '"/></g>' +
+      '<rect x="1" y="26" width="10" height="3" fill="#8a7f72"/>' +
+      '</svg>' +
+      '<div class="carrier-tag"></div>';
+  }
+
+  // (speed chips are built + rendered by the shared chrome via ctx.send)
+
+  // ---- core (board renderer + WS) ----
+  var lastState = null;
+  // PAINTBALL mode: latched on the first frame that carries a squad-game
+  // field (`regime` only rides squad frames). Classic frames never set it.
+  var PB_MODE = false;
+  var PB_CTX = null;             // filled at the end of this IIFE (hoisted)
+  var HA_CTX = null;             // the same, for the appended HIDDEN-AGENDA block
+  // A scrubber click that arrives before the first chrome frame used to be
+  // DROPPED: click-to-seek needs [startTick, maxTick] off the frame to map the
+  // x-fraction onto a tick, and the handler simply returned when there was no
+  // frame yet. The fraction is remembered instead and resolved on the first
+  // frame that carries the axis — the same one-shot shape as ?t=.
+  var SEEK_FRAC = null;
+  var replayAdapter = window.HiddenAgendaStaticReplay || null;
+  var coreConfig = {
+    canvas: canvas,
+    onText: function (txt) { onFrame(txt); },
+    onStatus: function (st) { onStatus(st); },
+    onFirstFrame: function () { core.setViewportFit(); },
+    // The zoom cluster and the minimap are removed with #viewpanel (the board
+    // always fits the frame), so there are no view controls to keep honest.
+    onTransform: function () {}
+  };
+  var core = replayAdapter
+    ? replayAdapter.createCore(coreConfig)
+    : window.BroadcastCore.create(coreConfig);
+
+  // Tell the League Replayer shell the board is alive and showing its
+  // locker-room curtain, so the shell can drop its own "loading replay…"
+  // toast (which would float mid-scene) and give a slow wasm boot a longer
+  // leash before escalating to the load-failure card.
+  postToShell('boot');
+
+  function send(cmd) { core.sendCommand(cmd); }
+
+  // Transport commands relayed DOWN from the League Replayer shell (embed mode):
+  // the shell's wall-mounted transport buttons/scrubber postMessage a command
+  // string, which we forward to the single shared replay websocket. Same command
+  // vocabulary the local transport uses, so the shell drives playback 1:1.
+  if (EMBED) {
+    window.addEventListener('message', function (ev) {
+      var m = ev.data;
+      if (!m || m.src !== 'ctf-shell') return;
+      if (m.type === 'cmd' && typeof m.cmd === 'string') send(m.cmd);
+      else if (m.type === 'seek' && m.tick != null) send('s:' + m.tick);
+      else if (m.type === 'pov' && m.slot != null) send('v:' + m.slot);
+    });
+  }
+
+  function onStatus(st) {
+    statusEl.textContent = st;
+    statusEl.classList.toggle('show', st !== 'open');
+  }
+
+  // ============================================================
+  //  Frame ingest
+  // ============================================================
+  var lastTick = -1;
+  var lastFf = false;   // previous frame's fast-forward flag (jump detection)
+  // (beat markers, lull spans, beats timeline and momentum state live in the
+  // shared chrome closure — see chrome_common.js)
+
+  function onFrame(txt) {
+    var s;
+    try { s = JSON.parse(txt); } catch (e) { return; }
+    lastState = s;
+    if (!PB_MODE && s.regime !== undefined) PB_MODE = true;
+    dismissLockerRoom();  // the board is live — fade the pre-load curtain
+
+    if (SEEK_T != null) { send('s:' + SEEK_T); SEEK_T = null; }
+    if (SEEK_FRAC != null && s.en) { seekToFraction(s, SEEK_FRAC); SEEK_FRAC = null; }
+    applyAchievementFocus(s);
+
+    // The board's real native size, read off the core's letterbox transform.
+    // THIS page re-layouts its own stage to it (syncBoardAspect) and it also
+    // rides along to the League Replayer shell (embed mode), which reads
+    // roster/KDA, clock, lives, flags and pov straight off this frame to paint
+    // the wall-mounted scorebug + KDA tables in lockstep with the board — and
+    // tracks the same aspect with its own syncBoardAspect.
+    if (core) {
+      var bt = core.getTransform();
+      if (bt.nativeW > 1 && bt.nativeH > 1) { s.boardW = bt.nativeW; s.boardH = bt.nativeH; }
+    }
+    syncBoardAspect(s);
+    postToShell('frame', s);
+
+    // Detect a jump (seek/loop): clear transient beats so nothing phantoms.
+    // A skip-lulls fast-forward frame legitimately advances up to 64 ticks
+    // (this frame or the previous one, which may have crossed OUT of the
+    // lull), so widen the expected stride accordingly instead of misreading
+    // the boost as a seek.
+    var stride = (s.ff || lastFf) ? Math.min((s.sp || 1) * 8, 64) : (s.sp || 1);
+    var jumped = (s.t < lastTick) || (lastTick >= 0 && s.t - lastTick > stride * 4 + 2);
+    if (jumped) { clearFeed(); clearBanners(); }
+    lastFf = !!s.ff;
+
+    renderScorebug(s);
+    renderClock(s);
+    renderTransport(s);
+
+    if (s.events && s.events.length && !jumped) {
+      for (var i = 0; i < s.events.length; i++) applyEvent(s.events[i], s);
+    }
+    // Even on a jump, register beat markers we can place from state? Markers
+    // come from events only; on a jump the tracker resync'd (no events), so we
+    // keep whatever markers we already collected.
+    ingestLeadSeries(s);
+    ingestLullSpans(s);
+    ingestBeats(s);
+    ingestCapHearts(s);
+    recordMomentum(s);
+
+    if (s.ph === 'gameover') { renderEndcard(s); if (s.over) setVerdict(s.over); }
+    else { $('endcard').classList.remove('on'); }
+
+    // PAINTBALL additions run last, over the classic chrome's own render.
+    if (PB_MODE && window.PaintballChrome) window.PaintballChrome.frame(s, PB_CTX, jumped);
+    // HIDDEN-AGENDA additions run in the same place and the same way: the
+    // classic chrome above has already drawn the plates, the clock, the
+    // transport and the scrubber off this game's own `teams` / `roster` /
+    // `lead` / `beats` fields, and the block below adds only what this game
+    // has that CTF does not.
+    if (window.AgendaChrome) window.AgendaChrome.frame(s, HA_CTX, jumped);
+
+    lastTick = s.t;
+  }
+
+  // (ingestLeadSeries / ingestLullSpans / ingestBeats / setVerdict live in the
+  // shared chrome — chrome_common.js)
+
+  // ---------- scorebug ----------
+  // One pip per PLAYER (8), keyed by stable join slot. Each pip is a pie of
+  // that seat's remaining lives (wedge = lives / max, clockwise from 12):
+  // full square = all lives, a sliver = last life, dim = down but respawning,
+  // hollow = eliminated. The strip is the "who's left" read (the roster IS
+  // the counter); the numeral is the exact lives count. Each pip is clickable
+  // → POV lens. NEVER shows kills (F1: kills ≠ score).
+  // p.lives counts SPARE respawns — the current life is the alive flag — so a
+  // seat's lives-left is lives + (alive ? 1 : 0), matching the team numeral.
+  // Max isn't in the stream, so refine it up from the observed roster: frame
+  // one shows every seat at full config lives, locking the right value.
+  var squadMaxLives = 1;
+  function seatLivesLeft(p) {
+    return (p.lives || 0) + (p.alive ? 1 : 0);
+  }
+  function renderSquad(el, s, team, pov) {
+    // The pip strip IS the team's life meter, grouped by policy: each policy's
+    // pips sit in one .squad-pol block with that policy's perk badges beside
+    // them. CTF-Doubles (two policies) mirrors WITHIN the strip — the two pip
+    // groups sit adjacent at its center with each policy's badges flanking
+    // OUTSIDE its own group — while the group order stays the headline's
+    // left-to-right policy order on both plates, so a badge always sits on
+    // the side of the name it belongs to. Persistent DOM keyed by seats +
+    // perks; pips update in place every frame.
+    var groups = teamPerkGroups(s, team);
+    var split = groups.length === 2;
+    var key = groups.map(function (g) {
+      return g.pol + '=' + (g.perks || []).join('+') + ':' +
+        g.players.map(function (p) { return p.s; }).join(',');
+    }).join('|');
+    if (el._key !== key) {
+      el.innerHTML = ''; el._pips = {};
+      groups.forEach(function (g, gi) {
+        var block = document.createElement('span');
+        block.className = 'squad-pol';
+        var iconsFirst = split && gi === 0;
+        var icos = null;
+        if (g.perks && g.perks.length) {
+          icos = document.createElement('span');
+          icos.className = 'perk-icos';
+          icos.innerHTML = perkIconsHtml(g.perks, s.pmods);
+        }
+        if (icos && iconsFirst) block.appendChild(icos);
+        g.players.forEach(function (p) {
+          var pip = document.createElement('span');
+          pip.className = 'squad-pip';
+          pip.title = shortName(p.name);
+          pip.addEventListener('click', function () { togglePov(p.s); });
+          block.appendChild(pip);
+          el._pips[p.s] = pip;
+        });
+        if (icos && !iconsFirst) block.appendChild(icos);
+        el.appendChild(block);
+      });
+      el._key = key;
+    }
+    var players = [];
+    groups.forEach(function (g) { players = players.concat(g.players); });
+    players.forEach(function (p) {
+      if (seatLivesLeft(p) > squadMaxLives) squadMaxLives = seatLivesLeft(p);
+    });
+    players.forEach(function (p) {
+      var pip = el._pips[p.s];
+      if (!pip) return;
+      var eliminated = !p.alive && p.lives <= 0;
+      var fill = Math.max(0, Math.min(1, seatLivesLeft(p) / squadMaxLives));
+      if (pip._fill !== fill) {
+        pip.style.setProperty('--fill', String(fill));
+        pip._fill = fill;
+      }
+      pip.classList.toggle('down', !p.alive && p.lives > 0);
+      pip.classList.toggle('out', eliminated);
+      pip.classList.toggle('carry', !!p.carry);
+      pip.classList.toggle('pov', pov === p.s);
+    });
+  }
+
+  // Rebuild the scorebug plates when the active team set changes (once per
+  // match in practice). Plates alternate sides in TEAM_ORDER — index 0/2 left,
+  // 1/3 right — so both team names stay innermost, flanking the clock.
+  var sbTeams = null;
+  function ensureScorebug(teams) {
+    // Keyed on team set AND mode: paintball frames arrive after the first
+    // classic-built frame, so the plates rebuild once when the mode is known.
+    var key = teams.join(',') + (PB_MODE ? '|pb' : '');
+    if (sbTeams === key) return;
+    sbTeams = key;
+    var sides = [$('plates-l'), $('plates-r')];
+    sides[0].innerHTML = '';
+    sides[1].innerHTML = '';
+    sides[0].classList.toggle('row', teams.length > 2);
+    sides[1].classList.toggle('row', teams.length > 2);
+    teams.forEach(function (team, i) {
+      var plate = document.createElement('div');
+      plate.className = 'plate ' + team + ' ' + (i % 2 === 0 ? 'side-l' : 'side-r');
+      plate.setAttribute('data-team', team);
+      if (PB_MODE) {
+        // PAINTBALL: the plate's CONTENTS change (hill time held, live hill
+        // coverage, tag-outs) — the plate, the sides, the squad strip and the
+        // clock column are the classic ones. The heart/flag icon is gone with
+        // the objective it belonged to.
+        plate.innerHTML =
+          '<div class="hillchip" id="hill-' + team + '" title="Hill coverage">—</div>' +
+          '<div class="team-id">' +
+          '<div class="lives-line">' +
+          '<span class="team-name plate-name" id="name-' + team + '">' + team.toUpperCase() + '</span>' +
+          '<span class="hcap" id="hcap-' + team + '" style="display:none"></span>' +
+          '<span class="lives-label pb-lbl">Hill</span>' +
+          '<span class="lives-num" id="lives-' + team + '">—</span>' +
+          '</div>' +
+          '<div class="pb-sub">' +
+          '<span class="pb-tags pb-lbl" id="tags-' + team + '"></span>' +
+          '<span class="squad" id="squad-' + team + '"></span>' +
+          '</div>' +
+          '</div>';
+        sides[i % 2].appendChild(plate);
+        return;
+      }
+      plate.innerHTML =
+        '<div class="flagicon" id="flag-' + team + '"></div>' +
+        '<div class="team-id">' +
+        '<div class="lives-line">' +
+        '<span class="team-name plate-name" id="name-' + team + '">' + team.toUpperCase() + '</span>' +
+        '<span class="hcap" id="hcap-' + team + '" style="display:none"></span>' +
+        '<span class="lives-label">' +
+          (team === 'impostor' ? 'Crew left' : 'Deposits') + '</span>' +
+        '<span class="lives-num" id="lives-' + team + '">—</span>' +
+        '</div>' +
+        '<div class="squad" id="squad-' + team + '"></div>' +
+        '</div>';
+      sides[i % 2].appendChild(plate);
+      buildFlag($('flag-' + team), teamCol(team) || AMBER);
+    });
+  }
+
+  function renderScorebug(s) {
+    var teams = activeTeams(s);
+    ensureScorebug(teams);
+    var tr = s.teams || {};
+    var lives = {};
+    teams.forEach(function (team) {
+      lives[team] = (tr[team] && tr[team].lives) || 0;
+    });
+
+    teams.forEach(function (team) {
+      setName('name-' + team, teamName(s, team, team.toUpperCase()));
+      setHandicap('hcap-' + team, s, team);
+      if (PB_MODE) {
+        var t = tr[team] || {};
+        // PAINTBALL: the big numeral is HILL TIME HELD (M:SS), the chip is
+        // live hill coverage, and the sub-line counts tag-outs. '—' until the
+        // frame actually carries this team's entry.
+        $('lives-' + team).textContent = tr[team] ? fmt(t.held || 0) : '—';
+        var chip = $('hill-' + team);
+        if (chip) {
+          chip.textContent = tr[team] ? (t.cov || 0) + '%' : '—';
+          chip.classList.toggle('own', !!t.own);
+          chip.style.color = teamCol(team) || PAPER;
+        }
+        var tagsEl = $('tags-' + team);
+        if (tagsEl) {
+          tagsEl.textContent = tr[team]
+            ? (t.tags || 0) + ' tags · ' + (t.cogs || 0) + ' up' : '';
+        }
+        renderSquad($('squad-' + team), s, team, s.pov);
+        // leader pulse when this team leads every rival on banked hill time
+        var bestPbRival = -Infinity;
+        teams.forEach(function (o) {
+          if (o !== team) bestPbRival = Math.max(bestPbRival, (tr[o] && tr[o].held) || 0);
+        });
+        var pbPlate = document.querySelector('.plate[data-team="' + team + '"]');
+        if (pbPlate) {
+          pbPlate.classList.toggle(
+            'leader',
+            (t.held || 0) - bestPbRival >= 5 && s.ph === 'playing'
+          );
+        }
+        return;
+      }
+      // '—' until the frame actually carries this team's entry (a pre-roster
+      // frame would otherwise read as a real 0). Matches the league shell.
+      $('lives-' + team).textContent = tr[team] ? lives[team] : '—';
+      // Squad pips grouped by policy with perk badges around each group
+      // (the pip strip is the life meter; see renderSquad).
+      renderSquad($('squad-' + team), s, team, s.pov);
+      updateFlag('flag-' + team, team, tr[team] || {}, s);
+      // leader pulse when this team leads EVERY rival by >= 3
+      var bestRival = -Infinity;
+      teams.forEach(function (o) {
+        if (o !== team) bestRival = Math.max(bestRival, lives[o]);
+      });
+      var plate = document.querySelector('.plate[data-team="' + team + '"]');
+      if (plate) {
+        plate.classList.toggle(
+          'leader',
+          lives[team] - bestRival >= 3 && s.ph === 'playing'
+        );
+      }
+    });
+  }
+
+  // (stripSeatSuffix / teamPolicies / teamName / teamHeadline / setName live
+  // in the shared chrome — chrome_common.js)
+
+  function updateFlag(id, team, tstate, s) {
+    var el = $(id);
+    /* GV32: 'captured' (heart retired, team eliminated) shows as off-pedestal
+       like 'taken' — the carrier tag stays empty since nobody carries it. */
+    var taken = tstate.flag === 'taken' || tstate.flag === 'captured';
+    var was = el.classList.contains('taken');
+    el.classList.toggle('taken', taken);
+    if (was !== taken) { el.classList.remove('flip'); void el.offsetWidth; el.classList.add('flip'); }
+    var tag = el.querySelector('.carrier-tag');
+    if (tag) {
+      if (taken && tstate.carrier >= 0) {
+        tag.textContent = shortName(rosterName(s, tstate.carrier));
+      } else { tag.textContent = ''; }
+    }
+  }
+
+  function shortName(n) {
+    n = String(n || '');
+    // Names are player addresses; keep them short + readable.
+    var at = n.indexOf('@'); if (at > 0) n = n.slice(0, at);
+    if (n.length > 10) n = n.slice(0, 10);
+    return n || '?';
+  }
+
+  // (clock, transport and lull shading live in the shared chrome —
+  // chrome_common.js: fmt / renderClock / renderTransport / renderLullSpans)
+
+  // ============================================================
+  //  Beats → surfaces  (§5)
+  // ============================================================
+  function applyEvent(e, s) {
+    // PAINTBALL: every beat goes through the appended game block, which draws
+    // LABELLED, CLICKABLE buttons on the scrubber (pbBeat) instead of
+    // chrome_common's unlabelled div markers. When the block handles a kind
+    // it returns true, so the classic switch never doubles it; classic
+    // replays never enter this branch at all.
+    if (PB_MODE && window.PaintballChrome &&
+        window.PaintballChrome.event(e, s, PB_CTX)) {
+      beatPulse();
+      return;
+    }
+    // Same contract for the HIDDEN-AGENDA kinds (freeze, witness, deposit,
+    // fakedeposit, meeting, say, vote, eject, order): the block returns true
+    // when it has drawn the row, so the classic switch never doubles it.
+    if (window.AgendaChrome && window.AgendaChrome.event(e, s, HA_CTX)) {
+      beatPulse();
+      return;
+    }
+    switch (e.k) {
+      case 'kill': onKill(e, s); markBeat(e.t, 'kill', killMarkerTeam(e, s)); beatPulse(); break;
+      case 'steal': onSteal(e, s); markBeat(e.t, 'steal', e.flag); beatPulse(); break;
+      case 'return': onReturn(e, s); markBeat(e.t, 'return', e.flag); beatPulse(); break;
+      case 'capture': recordCapHeart(e); onCapture(e, s); markBeat(e.t, 'capture', captureTeam(s, e)); beatPulse(); break;
+      case 'respawn': /* board rematerialize handles this visually */ break;
+      case 'gameover': /* end-card is state-driven */ break;
+      case 'phase': /* clock caption handles phase */ break;
+    }
+  }
+
+  // Slots already drawn as the partner of a provable same-tick trade, so the
+  // second half of the pair is suppressed (one linked row, not two). Keyed by
+  // "tick:victimSlot"; a tiny ring is plenty since only same-tick pairs matter.
+  var tradeConsumed = {};
+  function onKill(e, s) {
+    var killer = e.killer, victim = e.victim;
+    var victimTeam = teamOf(s, victim);
+    var killerTeam = killer >= 0 ? teamOf(s, killer) : null;
+    var glyph = '▸';
+    var badge = '';
+    if (e.trade !== undefined && e.trade >= 0) {
+      // Provable mutual trade: the server proved these two killed each other
+      // this tick (the two killers ARE the two victims). Draw ONE linked row
+      // with both names; skip the partner's own event so it isn't doubled.
+      if (tradeConsumed[e.t + ':' + victim]) { delete tradeConsumed[e.t + ':' + victim]; return; }
+      tradeConsumed[e.t + ':' + e.trade] = true;
+      var row = document.createElement('div');
+      row.className = 'feed-row';
+      row.innerHTML = '<span class="who ' + (victimTeam || '') + '">' + esc(shortName(rosterName(s, victim))) + '</span>' +
+        '<span class="glyph">⇄</span>' +
+        '<span class="who ' + (teamOf(s, e.trade) || '') + '">' + esc(shortName(rosterName(s, e.trade))) + '</span>' +
+        '<span class="badge">traded</span>';
+      pushFeed(row);
+      return;
+    }
+    var row = document.createElement('div');
+    row.className = 'feed-row';
+    if (e.amb) {
+      // Same-tick multi-kill the sim can't pair (a 3-way pileup or two
+      // independent kills). Attribution is honestly unknown (F7): show the
+      // victim with a neutral marker, never a fabricated killer or "traded".
+      badge = '<span class="badge">double KO</span>';
+      row.innerHTML = '<span class="who ' + (victimTeam || '') + '">' + esc(shortName(rosterName(s, victim))) + '</span>' + badge;
+    } else {
+      if (e.tk) { badge = '<span class="badge tk">team kill</span>'; row.classList.add('flagkill'); }
+      var killerName = killer >= 0 ? shortName(rosterName(s, killer)) : 'the arena';
+      row.innerHTML = '<span class="who ' + (killerTeam || '') + '">' + esc(killerName) + '</span>' +
+        '<span class="glyph">' + glyph + '</span>' +
+        '<span class="who ' + (victimTeam || '') + '">' + esc(shortName(rosterName(s, victim))) + '</span>' + badge;
+    }
+    pushFeed(row);
+  }
+
+  function onSteal(e, s) {
+    var heartTeam = e.flag; // the team whose heart was TAKEN (e.flag is the legacy event field)
+    banner(String(heartTeam).toUpperCase() + ' HEART TAKEN', 'steal accent ' + heartTeam);
+  }
+  function onReturn(e, s) {
+    var heartTeam = e.flag;
+    banner(String(heartTeam).toUpperCase() + ' HEART RETURNED', 'returned accent ' + heartTeam);
+  }
+  function onCapture(e, s) {
+    var byTeam = captureTeam(s, e);
+    banner(String(byTeam).toUpperCase() + ' CAPTURES', 'wipe accent ' + byTeam);
+  }
+
+  // (teamOf / esc live in the shared chrome — chrome_common.js. The shared esc
+  // also escapes the double-quote, which this page's old copy dropped.)
+
+  // ---------- kill feed queue (fixed reserve, dwell floor) ----------
+  var feedEl = $('killfeed');
+  var MAX_FEED = 4;
+  function pushFeed(row) {
+    feedEl.insertBefore(row, feedEl.firstChild);
+    while (feedEl.children.length > MAX_FEED) feedEl.removeChild(feedEl.lastChild);
+    // Dwell floor (lever 2): a wall-clock minimum so the row reads even at 16×.
+    var hold = dwellFloor('feed');
+    // animFactor cap (lever 1): the slide-in duration never dips below its
+    // read-time, so the row still overshoots-and-settles legibly at high speed.
+    row.style.animationDuration = (250 / animFactor()) + 'ms';
+    setTimeout(function () {
+      if (row.parentNode) { row.classList.add('leaving'); setTimeout(function () { if (row.parentNode) row.parentNode.removeChild(row); }, 300); }
+    }, hold);
+  }
+  function clearFeed() { feedEl.innerHTML = ''; }
+
+  // ---------- banner lane queue (one at a time, min hold) ----------
+  var bannerEl = $('bannerlane');
+  var bannerQueue = [];
+  var bannerBusy = false;
+  function banner(text, cls) {
+    bannerQueue.push({ text: text, cls: cls });
+    pumpBanner();
+  }
+  function pumpBanner() {
+    if (bannerBusy || !bannerQueue.length) return;
+    bannerBusy = true;
+    var b = bannerQueue.shift();
+    var chip = document.createElement('div');
+    chip.className = 'banner-chip ' + b.cls;
+    chip.textContent = b.text;
+    bannerEl.appendChild(chip);
+    // lever 1 (animFactor cap): the pop-in never plays faster than 2x, so a
+    // fast-forward scrub can't reduce a banner to a subliminal flash.
+    chip.style.animationDuration = (300 / animFactor()) + 'ms';
+    var hold = dwellFloor('banner'); // lever 2: wall-clock dwell floor (~1.9s)
+    setTimeout(function () {
+      chip.classList.add('leaving');
+      setTimeout(function () {
+        if (chip.parentNode) chip.parentNode.removeChild(chip);
+        bannerBusy = false;
+        pumpBanner();
+      }, 260);
+    }, hold);
+  }
+  function clearBanners() {
+    bannerQueue = [];
+    bannerEl.innerHTML = '';
+    bannerBusy = false;
+  }
+
+  // (scrubber beat markers — markBeat / killMarkerTeam / renderBeatMarkers —
+  // live in the shared chrome — chrome_common.js)
+
+  // (momentum graph — recordMomentum / renderMomentum and their state —
+  // lives in the shared chrome — chrome_common.js)
+
+  // ============================================================
+  //  End-card (§5/§8) — the END SEGMENT: verdict, win condition and match
+  //  stats, held on screen by the server for ~10s before a looping restart.
+  //  Reads isDraw BEFORE winner (F4); names the key (F3).
+  // ============================================================
+  function overLives(o, team) {
+    // A team's final lives from the verdict frame: the team-keyed map when
+    // present, else the legacy red/blue scalars.
+    if (o.teams && o.teams[team]) return o.teams[team].lives || 0;
+    return team === 'red' ? (o.redLives || 0) : team === 'blue' ? (o.blueLives || 0) : 0;
+  }
+
+  function endcardWinCondition(o, teams) {
+    // The condition CHIP: how the match ended, in two or three words.
+    // (A time-limit ending is always a draw in the current rules — the sim's
+    // checkMaxTicks path never crowns a winner — so timeLimit only pairs
+    // with draw here.)
+    if (o.endRule !== undefined) {
+      // PAINTBALL names the RULE the server actually applied, so the chip can
+      // never disagree with the endRule in results.json.
+      switch (o.endRule) {
+        case 'wipe': return o.draw ? 'MUTUAL WIPE' : 'WIPE';
+        case 'mercy': return 'MERCY — LEAD BEYOND THE CLOCK';
+        case 'wall_clock': return 'WALL-CLOCK STOP';
+        case 'sim_fault':
+        case 'host_error': return 'FAULT — NO RESULT';
+        default: return o.draw ? 'FULL TIME — DEAD EVEN' : 'FULL TIME ON THE HILL';
+      }
+    }
+    if (o.draw) return o.timeLimit ? 'TIME LIMIT — DRAW' : 'DRAW';
+    var losers = teams.filter(function (t) { return t !== o.winner; });
+    var bestLoser = 0;
+    losers.forEach(function (t) { bestLoser = Math.max(bestLoser, overLives(o, t)); });
+    return bestLoser <= 0 ? 'ELIMINATION' : 'HEART CAPTURE';
+  }
+
+  function endcardOrder(a, b) {
+    // Kills lead the board; fewer deaths, then captures, break ties.
+    return (b.k || 0) - (a.k || 0) || (a.d || 0) - (b.d || 0) ||
+      (b.cap || 0) - (a.cap || 0) || a.s - b.s;
+  }
+
+  function endcardBadge(cls, count, title) {
+    // One honor icon; repeat events fold into a ·N suffix instead of stacking.
+    if (!count) return '';
+    return '<span class="ec-badge ' + cls + '" title="' + title + '">' +
+      (count > 1 ? '·' + count : '') + '</span>';
+  }
+
+  // Which hearts each seat captured, keyed by join slot: fed by the up-front
+  // beat timeline (replays ship every capture on the first HUD frame) and by
+  // live capture events, deduped by tick|slot so the two paths never
+  // double-count one capture (a loop restart re-fires both, harmlessly).
+  var capHeartsBySlot = {};
+  var capHeartsSeen = {};
+  function recordCapHeart(e) {
+    if (e.by == null || e.by < 0 || !e.flag) return;
+    var key = e.t + '|' + e.by;
+    if (capHeartsSeen[key]) return;
+    capHeartsSeen[key] = true;
+    (capHeartsBySlot[e.by] = capHeartsBySlot[e.by] || []).push(e.flag);
+  }
+  function ingestCapHearts(s) {
+    if (!s.beats) return;
+    for (var i = 0; i < s.beats.length; i++) {
+      if (s.beats[i].k === 'capture') recordCapHeart(s.beats[i]);
+    }
+  }
+
+  function capturedHeartHtml(heartTeam) {
+    // One captured heart, drawn as the captured team's own heart art (its
+    // baked pixel art); a team without baked art gets a tinted glyph.
+    if (heartTeam === 'red' || heartTeam === 'blue' ||
+        heartTeam === 'green' || heartTeam === 'yellow') {
+      return '<span class="ec-heart ' + heartTeam + '" title="Captured the ' + heartTeam + ' heart"></span>';
+    }
+    return '<span class="ec-heart-glyph" title="Captured an enemy heart">♥</span>';
+  }
+
+  function capturedHeartsHtml(s, p) {
+    // The Cap column renders EVERY captured heart, one per capture — a 4-team
+    // match (GV32: a capture eliminates its team and play continues) can see
+    // one seat retire two or three rival hearts. The beat timeline names each
+    // heart; when it can't (older servers ship no beats), fall back to the
+    // roster's capture count, colored as the enemy heart only when two teams
+    // make that unambiguous.
+    var caps = p.cap || 0;
+    if (caps <= 0) return '';
+    var flags = capHeartsBySlot[p.s] || [];
+    if (flags.length < caps) {
+      var teams = activeTeams(s);
+      var enemy = teams.length === 2 ? (teams[0] === p.team ? teams[1] : teams[0]) : null;
+      flags = [];
+      for (var i = 0; i < caps; i++) flags.push(enemy);
+    }
+    return flags.map(capturedHeartHtml).join('');
+  }
+
+  function renderEndcardRows(s, team, el, mvpSlot) {
+    // Final per-player stat lines, top killer first. The MVP (winning team's
+    // best line) reads in amber — no star prefix, it would break the name
+    // column's alignment. Clstr counts grenade/spray multi-kill events; the
+    // Cap column renders each captured heart itself, one per capture, in the
+    // captured team's color; a dagger icon marks
+    // teammate kills. A mixed team (2+ policies) groups its rows under policy
+    // subheaders so each policy's contribution reads separately.
+    var rows = (s.roster || []).filter(function (p) { return p.team === team; })
+      .slice().sort(endcardOrder);
+    var pols = teamPolicies(s, team);
+    var grouped = pols.length > 1 && pols.length <= 4;
+    var html = '';
+    function rowHtml(p) {
+      var mvp = mvpSlot != null && p.s === mvpSlot;
+      if (PB_MODE) {
+        // PAINTBALL: the row is a COG (its anonymous alias), and the columns
+        // are tags dealt, tags taken and what its squad painted. Kills and
+        // captures are not the score here and never appear as one.
+        var pbMarks = endcardBadge('bs', p.tk, 'Friendly fire — tagged a teammate');
+        var tr = (s.teams || {})[p.team] || {};
+        return '<div class="ec-row' + (mvp ? ' mvp' : '') + '">' +
+          '<span class="pcell">' +
+          '<span class="pname">' + esc(p.alias || shortName(rosterName(s, p.s))) + '</span>' +
+          pbMarks +
+          '</span>' +
+          '<span class="n">' + (p.k || 0) + '</span>' +
+          '<span class="n">' + (p.d || 0) + '</span>' +
+          '<span class="n clstr">' + (tr.paint || 0) + '</span>' +
+          '</div>';
+      }
+      var marks = endcardBadge('bs', p.tk, 'Backstab — killed a teammate');
+      var cluster = (p.mk2 || 0) + (p.mk3 || 0);
+      return '<div class="ec-row' + (mvp ? ' mvp' : '') + '">' +
+        '<span class="pcell">' +
+        '<span class="pname">' + esc(shortName(rosterName(s, p.s))) + '</span>' +
+        marks +
+        '</span>' +
+        '<span class="n">' + (p.k || 0) + '</span>' +
+        '<span class="n">' + (p.d || 0) + '</span>' +
+        '<span class="n clstr">' + (cluster > 0 ? cluster : '') + '</span>' +
+        '<span class="n cap">' + capturedHeartsHtml(s, p) + '</span>' +
+        '</div>';
+    }
+    if (grouped) {
+      pols.forEach(function (pol) {
+        html += '<div class="ec-pol">' + esc(teamHeadline(pol)) + '</div>';
+        rows.forEach(function (p) {
+          var pp = p.pol != null ? p.pol : stripSeatSuffix(p.name);
+          if (pp === pol) html += rowHtml(p);
+        });
+      });
+    } else {
+      rows.forEach(function (p) { html += rowHtml(p); });
+    }
+    el.innerHTML = html;
+  }
+
+  // Rebuild the endcard's per-team stat panels when the active team set
+  // changes (once per match in practice): one panel per team, in display order.
+  var ecTeams = null;
+  function ensureEndcardTeams(teams) {
+    var key = teams.join(',') + (PB_MODE ? '|pb' : '');
+    if (ecTeams === key) return;
+    ecTeams = key;
+    var wrap = $('ec-teams');
+    wrap.innerHTML = '';
+    teams.forEach(function (team) {
+      var el = document.createElement('div');
+      el.className = 'ec-team';
+      el.id = 'ec-team-' + team;
+      el.innerHTML = PB_MODE
+        ? '<div class="ec-tname ' + team + '" id="ec-tname-' + team + '">' + team.toUpperCase() + '</div>' +
+          '<div class="ec-lives">' +
+          '<span class="fl-num ' + team + '" id="ec-' + team + '">0:00</span>' +
+          '<span class="fl-cap">Hill time</span>' +
+          '</div>' +
+          '<div class="ec-thead"><span>Cog</span><span>Tags</span><span>Out</span><span>Paint</span></div>' +
+          '<div id="ec-rows-' + team + '"></div>'
+        : '<div class="ec-tname ' + team + '" id="ec-tname-' + team + '">' + team.toUpperCase() + '</div>' +
+          '<div class="ec-lives">' +
+          '<span class="fl-num ' + team + '" id="ec-' + team + '">0</span>' +
+          '<span class="fl-cap">Lives left</span>' +
+          '</div>' +
+          '<div class="ec-thead"><span>Player</span><span>K</span><span>D</span><span>Clstr</span><span>Cap</span></div>' +
+          '<div id="ec-rows-' + team + '"></div>';
+      wrap.appendChild(el);
+    });
+  }
+
+  function renderEndcard(s) {
+    var card = $('endcard');
+    if (!s.over) return;
+    card.classList.add('on'); // own the frame at GameOver (§8) — before either verdict branch
+    var o = s.over;
+    var teams = activeTeams(s);
+    ensureEndcardTeams(teams);
+
+    // The loop countdown ticks every second while everything else is frozen,
+    // so it renders unconditionally; the static content is keyed and only
+    // rebuilt when the verdict frame actually changes (24fps hold, no churn).
+    $('ec-replay').innerHTML = s.lp && s.hold > 0
+      ? 'Replaying in <b>' + s.hold + '</b>' : '';
+
+    var key = [s.mx, o.winner, o.draw, o.timeLimit, (s.roster || []).length].join('|');
+    if (card._key === key) return;
+    card._key = key;
+
+    var head = $('ec-headline'), how = $('ec-how');
+    $('ec-wincond').textContent = endcardWinCondition(o, teams);
+
+    // MVP: the winning team's best final line (kills > fewer deaths >
+    // captures — the capturer keeps their ⚑ mark, the star follows the guns).
+    // A draw crowns nobody — the fidelity rules never invent a distinction the
+    // sim didn't make (F4).
+    var mvpSlot = null;
+    if (!o.draw) {
+      var winners = (s.roster || []).filter(function (p) { return p.team === o.winner; })
+        .sort(endcardOrder);
+      if (winners.length) mvpSlot = winners[0].s;
+    }
+    teams.forEach(function (team) {
+      $('ec-' + team).textContent = PB_MODE
+        ? fmt(team === 'red' ? (o.hillRed || 0) : (o.hillBlue || 0))
+        : overLives(o, team);
+      $('ec-tname-' + team).textContent = teamName(s, team, team.toUpperCase());
+      $('ec-team-' + team).classList.toggle('win', !o.draw && o.winner === team);
+      renderEndcardRows(s, team, $('ec-rows-' + team), mvpSlot);
+    });
+
+    if (PB_MODE) {
+      // PAINTBALL: the verdict names the rule the server applied and always
+      // states both banked hill clocks.
+      var hillLine = 'RED holds ' + fmt(o.hillRed || 0) + ' — BLUE ' +
+        fmt(o.hillBlue || 0) + ' · game ' + (o.game || 1) + '/' + (o.games || 1) +
+        ' · ' + String(o.regime || '').toUpperCase();
+      if (o.draw) {
+        head.className = 'headline draw';
+        head.textContent = 'DEAD EVEN';
+        how.textContent = hillLine +
+          ' — both squads banked the same hill time, so this half scores 0.500 each.';
+        return;
+      }
+      var pbWinner = o.winner;
+      var pbWinName = teamName(s, pbWinner, String(pbWinner).toUpperCase());
+      head.className = 'headline ' + pbWinner;
+      head.textContent = pbWinName + ' WINS';
+      switch (o.endRule) {
+        case 'wipe':
+          head.textContent = pbWinName + ' WIPES THE FIELD';
+          how.textContent = hillLine +
+            ' — the other squad ran out of cogs, so the survivor was credited' +
+            ' every remaining tick.';
+          break;
+        case 'mercy':
+          how.textContent = hillLine +
+            ' — the lead was bigger than the clock left, so the rules ended it.';
+          break;
+        case 'wall_clock':
+          how.textContent = hillLine +
+            ' — the engine hit its wall-clock budget and scored the half from' +
+            ' the hill counts at that tick.';
+          break;
+        default:
+          how.textContent = hillLine + ' — full time on the hill clock.';
+      }
+      return;
+    }
+
+    if (o.draw) {
+      head.className = 'headline draw';
+      head.textContent = 'DRAW — NO SCORE';
+      how.textContent = o.timeLimit
+        ? 'Time expired before a capture or a wipe — a scoreless draw, with no tiebreak on lives.'
+        : 'The match ended with neither side scoring — no winner.';
+      return;
+    }
+
+    var winner = o.winner;
+    var winName = teamName(s, winner, String(winner).toUpperCase());
+    head.className = 'headline ' + winner;
+    head.textContent = winName + ' WINS';
+
+    var losers = teams.filter(function (t) { return t !== winner; });
+    var winL = overLives(o, winner);
+    var bestLoser = 0;
+    losers.forEach(function (t) { bestLoser = Math.max(bestLoser, overLives(o, t)); });
+
+    if (o.timeLimit) {
+      // Time-limit resolution — name the key and the values (F3).
+      if (winL !== bestLoser) {
+        how.textContent = 'Time expired — ' + winName + ' held more lives (' + winL + ' vs ' + bestLoser + ').';
+      } else {
+        how.textContent = 'Time expired — lives tied; ' + winName + ' won on heart progress.';
+      }
+    } else {
+      if (bestLoser <= 0) {
+        head.textContent = losers.length === 1
+          ? winName + ' WIPES OUT ' +
+            teamName(s, losers[0], String(losers[0]).toUpperCase())
+          : winName + ' WIPES THE FIELD';
+        how.textContent = winName + ' eliminated every opposing life.';
+      } else {
+        how.textContent = winName + ' captured the enemy heart.';
+      }
+    }
+  }
+
+  // ============================================================
+  //  Transport wiring — DOM controls emit the legacy chat chars +
+  //  the ctf-side s:/v: whole-string commands.
+  // ============================================================
+  function togglePlay() { send(' '); }
+  // (speed chips + their speed→command map live in the shared chrome)
+  $('btn-play').addEventListener('click', togglePlay);
+  $('btn-restart').addEventListener('click', function () { send(','); });
+  $('btn-back').addEventListener('click', function () { send('b'); });
+  $('btn-fwd').addEventListener('click', function () { send('.'); });
+  $('btn-end').addEventListener('click', function () { send('e'); });
+  $('btn-loop').addEventListener('click', function () { send('r'); });
+  $('btn-skip').addEventListener('click', function () { send('f'); });
+
+  // click-to-seek: map x-fraction to a tick and send s:<tick>
+  // Map an x-fraction of the scrubber onto the shown [startTick, maxTick] axis
+  // and seek there. One place, shared by a live click and by a click that had
+  // to wait for the first frame.
+  function seekToFraction(s, frac) {
+    var st = Math.max(0, s.st || 0);
+    var mx = Math.max(st + 1, s.mx || 1);
+    send('s:' + (st + Math.round(frac * (mx - st))));
+  }
+
+  $('scrub').addEventListener('click', function (ev) {
+    var rect = this.getBoundingClientRect();
+    var frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+    // The axis lives on the frame, so a click before the first frame cannot be
+    // mapped yet — QUEUE it (onFrame flushes SEEK_FRAC) rather than dropping
+    // it. A dropped first click is invisible: the board is already drawn, the
+    // transport looks alive, and the viewer just does not move.
+    if (!lastState || !lastState.en) { SEEK_FRAC = frac; return; }
+    seekToFraction(lastState, frac);
+  });
+
+  // keyboard shortcuts mirror the transport
+  window.addEventListener('keydown', function (ev) {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    var k = ev.key;
+    if (k === ' ') { ev.preventDefault(); togglePlay(); }
+    else if (k === ',' || k === '<') send(',');
+    else if (k === '.' || k === '>') send('.');
+    else if (k === 'b') send('b');
+    else if (k === 'e') send('e');
+    else if (k === 'r') send('r');
+    else if (k === 'f') send('f');
+    else if (k === '+' || k === '=') send('+');
+    else if (k === '-' || k === '_') send('-');
+    else if (k === 'o') setSpoilers(!getSpoilers());
+    // No z/x/0 and no arrow panning: the board is a fixed 27x19 that always
+    // fits the frame, so #viewpanel and every view control went with it.
+    else if (k >= '1' && k <= '9') send(k);
+    // keydown never crosses the iframe boundary: relay Esc to the league
+    // shell, which relays it on to the Observatory theater host.
+    else if (k === 'Escape') postToShell('esc');
+  });
+
+  // ============================================================
+  //  Fixed-aspect fit: size the composition to the board's native aspect
+  //  inside the embed box, then scale the whole thing (board + overlays) as
+  //  one unit. Chrome sizes off the STAGE width, so overlays stay locked to
+  //  the graphics at any container shape (§2, L82 bounded-embed).
+  // ============================================================
+  function relayout() {
+    var boxW = viewport.clientWidth, boxH = viewport.clientHeight;
+    if (!boxW || !boxH) return;
+    // The board region (game action) fits the board aspect into the box BETWEEN a
+    // reserved top band (the scorebug) and bottom band (the transport), so neither
+    // ever sits over play. Each band's pixel height depends on --hudscale (→ board
+    // width) and the board fit depends on the bands, so iterate to a FIXED POINT:
+    // stop as soon as a pass measures the same bands it was laid out with. Two
+    // passes settle a container resize, but a MAP-ASPECT change (the 1.874:1
+    // arena → a square four-team board) swings --hudscale far enough that the
+    // second pass is still reserving the old bands, which would leave the board
+    // a couple of percent off its true aspect — visible as thin dead strips.
+    var scorebug = document.getElementById('scorebug');
+    var transport = document.getElementById('transport');
+    var root = document.documentElement;
+    var topBand = parseFloat(getComputedStyle(root).getPropertyValue('--topband')) || 0;
+    var band = parseFloat(getComputedStyle(root).getPropertyValue('--band')) || 0;
+    var stageW = 0, stageH = 0;
+    for (var pass = 0; pass < 4; pass++) {
+      var prevTop = topBand, prevBand = band;
+      var availH = Math.max(1, boxH - topBand - band);
+      var boardW, boardH;
+      if (boxW / availH > BOARD_ASPECT) {
+        boardH = availH; boardW = Math.round(availH * BOARD_ASPECT);
+      } else {
+        boardW = boxW; boardH = Math.round(boxW / BOARD_ASPECT);
+      }
+      stageW = boardW; stageH = boardH + topBand + band;
+      stage.style.width = stageW + 'px';
+      stage.style.height = stageH + 'px';
+      // One scale for the whole composition: chrome was authored against a
+      // ~760px-wide reference board, so --hudscale is the board's on-screen width
+      // over that reference (clamped so a huge featured embed doesn't bloat the
+      // chrome and a tiny 360px floor stays legible).
+      var scale = Math.max(0.5, Math.min(1.6, boardW / 760));
+      root.style.setProperty('--hudscale', scale.toFixed(3));
+      stage.classList.toggle('tiny', boardW <= 620);
+      // Measure each band's natural height → reserve exactly that.
+      topBand = scorebug ? scorebug.offsetHeight : 0;
+      band = transport ? transport.offsetHeight : 0;
+      root.style.setProperty('--topband', topBand + 'px');
+      root.style.setProperty('--band', band + 'px');
+      if (Math.abs(topBand - prevTop) < 0.5 && Math.abs(band - prevBand) < 0.5) break;
+    }
+    core.setViewportFit();
+  }
+  var ro = new ResizeObserver(relayout);
+  ro.observe(viewport);
+  window.addEventListener('resize', relayout);
+
+  // The context the appended PAINTBALL block reads the classic chrome
+  // through. Declared here (hoisted `var`, so onFrame sees it however early
+  // the first frame lands) rather than duplicating any of it: the game block
+  // must not re-implement naming, escaping, feed insertion or the transport.
+  PB_CTX = {
+    $: $, C: C, esc: esc, fmt: fmt, send: send,
+    teamCol: teamCol, activeTeams: activeTeams, teamOf: teamOf,
+    teamName: teamName, rosterName: rosterName, shortName: shortName,
+    pushFeed: pushFeed, banner: banner, togglePov: togglePov,
+    getState: function () { return lastState; }
+  };
+  if (window.PaintballChrome) window.PaintballChrome.install(PB_CTX);
+  // The same context, under this game's name, for the appended block below.
+  // It re-implements NONE of this: naming, escaping, the feed queue, the
+  // banner lane, the transport and the beat markers all stay up here.
+  HA_CTX = PB_CTX;
+  if (window.AgendaChrome) window.AgendaChrome.install(HA_CTX);
+
+  relayout();
+  core.start();
+})();
+</script>
+<!-- ============================================================
+     HIDDEN-AGENDA additions to the inherited coworld-ctf chrome
+     ============================================================
+     Everything ABOVE this banner is the starter's page: its CSS,
+     its body markup and its page script, edited only by the
+     removals, the two re-lettered literals and the three hook
+     lines tools/build_page.py documents and asserts. Everything
+     BELOW is this game's own block, appended, never a rewrite
+     that reuses the starter's ids (cogame-gridlock, 2026-08-23).
+     ============================================================ -->
+<style>
 
 /* ============================================================
    HIDDEN-AGENDA additions to the inherited coworld-ctf chrome.
@@ -1196,6 +2460,7 @@ body[data-embed] #board { top: 0; height: 100%; }
   z-index: 8;
   pointer-events: none;
   max-width: 96%;
+  overflow: hidden;
 }
 .rchip {
   display: flex;
@@ -1215,7 +2480,16 @@ body[data-embed] #board { top: 0; height: 100%; }
 .rchip .rglyph { color: var(--tc, var(--paper)); font-family: var(--pixfont); }
 .rchip.frozen { opacity: 0.62; }
 .rchip.ejected { opacity: 0.35; text-decoration: line-through; }
-.rchip .rpol { color: var(--paper-dim); }
+/* The alias is the identity and never shrinks; the POLICY name is what gives
+   way when five chips do not fit the board width, so the strip clips a name
+   rather than running off the stage. */
+.rchip { min-width: 0; }
+.rchip .rpol {
+  color: var(--paper-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* --- vote board: five VOTER -> TARGET rows, centre-right of the board -- */
 #voteboard {
@@ -1367,254 +2641,48 @@ button.beat-marker {
 #stage.tiny .banner-chip.caught { font-size: calc(11 * var(--u)); }
 
 </style>
-</head>
-<body>
-<div id="viewport">
-<div id="stage">
-  <canvas id="board"></canvas>
-  <div id="lightpool"></div>
-  <div id="grain" class="amb"></div>
-
-  <!-- Pre-load curtain, inherited from the starter with this game's plate. -->
-  <div id="lockerroom" role="status" aria-label="Loading replay">
-    <div class="lk-art" id="lk-art" aria-hidden="true">
-      <img class="lk-bg" id="lk-bg" alt="">
-      <div class="lk-sprites" id="lk-sprites"></div>
-    </div>
-    <div class="lk-glow" aria-hidden="true"></div>
-    <div class="lk-cap" id="lk-cap" aria-hidden="true">Sealing the airlock&hellip;</div>
-    <div class="lk-bar" aria-hidden="true"><i></i></div>
-    <div class="lk-sub">Station airlock &middot; Loading replay</div>
-  </div>
-
-  <div id="chrome">
-    <!-- Two plates, keyed crew and impostor, on the starter's own plate
-         machinery: headline, big numeral, label, subline. -->
-    <div id="scorebug">
-      <div class="plates" id="plates-l"></div>
-
-      <div class="clock-col">
-        <div class="clock amb" id="clock">
-          <div class="time" id="clock-time">0:00</div>
-          <span class="ffwd-mini" id="ffwd-mini">&#9656;&#9656;</span>
-          <div class="caption" id="clock-caption">Sealing the airlock</div>
-        </div>
-      </div>
-
-      <div class="plates" id="plates-r"></div>
-    </div>
-
-    <!-- HIDDEN-AGENDA: the roster strip (spectator-side role reveal) and the
-         vote board. Both are clipped to the board region between --topband and
-         --band; neither sits in the transport band. -->
-    <div id="rosterstrip"></div>
-    <div id="voteboard">
-      <div id="vb-head">MEETING</div>
-      <div id="vb-rows"></div>
-      <div id="vb-count">RESOLVES IN &mdash;</div>
-    </div>
-
-    <div id="bannerlane"></div>
-    <div id="killfeed"></div>
-
-    <div id="transport">
-      <!-- Buttons on top, scrubber/timeline below (the transport sits in its own
-           reserved band under the board, so nothing here overlaps play). -->
-      <div class="tbar">
-        <button class="tbtn" id="btn-restart" title="Restart (,)">&#10226;</button>
-        <button class="tbtn" id="btn-back" title="Back one tick (b)">&#9666;|</button>
-        <button class="tbtn" id="btn-play" title="Play / pause (space)">&#9654;</button>
-        <button class="tbtn" id="btn-fwd" title="Skip +5s (.)">+5s</button>
-        <button class="tbtn" id="btn-end" title="Jump to end (e)">|&#9656;</button>
-        <button class="tbtn" id="btn-loop" title="Loop (r)">&#8635;</button>
-        <button class="tbtn" id="btn-skip" title="Auto-skip lulls (f)">&#9656;&#9656;</button>
-        <button class="tbtn" id="btn-spoilers" title="Spoilers: meetings / freezes / ejections / winner on the timeline ahead of the playhead (o)">spoilers</button>
-        <span class="ffwd-chip" id="ffwd-chip">&#9656;&#9656; SKIPPING LULL</span>
-        <span class="win-chip" id="win-chip"></span>
-        <span class="tick-clock" id="tick-clock">0 / 0</span>
-        <span class="tsep"></span>
-        <div class="speedchips" id="speedchips"></div>
-      </div>
-      <div class="scrub" id="scrub">
-        <!-- momentum graph sits UNDERNEATH the seek track, on the SAME tick/mx
-             axis, so the playhead crosses it 1:1 with the timeline -->
-        <svg class="momentum" id="momentum" viewBox="0 0 1000 100"
-             preserveAspectRatio="none" aria-hidden="true"></svg>
-        <span class="momentum-label">RACE TO WIN</span>
-        <div class="scrub-track"></div>
-        <div class="scrub-fill" id="scrub-fill"></div>
-        <!-- lull shading rides ABOVE track+fill so the quiet stretches read
-             dimmed whether played or not; the amber head still wins (z:3) -->
-        <div id="lulls"></div>
-        <div class="scrub-win" id="scrub-win"></div>
-        <div class="scrub-head" id="scrub-head"></div>
-      </div>
-    </div>
-
-    <div id="endcard">
-      <div class="headline" id="ec-headline">&mdash;</div>
-      <div class="wincond" id="ec-wincond"></div>
-      <div class="how" id="ec-how"></div>
-      <!-- HIDDEN-AGENDA: the role reveal table. -->
-      <div id="ec-roles"></div>
-      <div class="ec-teams" id="ec-teams"></div>
-      <div class="ec-replay" id="ec-replay"></div>
-    </div>
-  </div>
-
-  <div id="status">connecting</div>
-</div>
-</div>
-
-<!-- WIRE_CONSTANTS -->
-<!-- CHROME_COMMON -->
-<!-- BROADCAST_CORE -->
-
 <script>
 (function () {
   'use strict';
 
   // ============================================================
   //  HIDDEN-AGENDA additions to the inherited coworld-ctf chrome.
-  //  Everything above the banner comment in the style block is the starter's;
-  //  everything here is the game block: the two plate sublines, the vote board,
-  //  the roster strip with the spectator role reveal, the CAUGHT! banner
-  //  builder, the feed row builders, the endcard role reveal, and the scrubber
-  //  beat buttons.
+  // ============================================================
+  //  Everything above the banner comment is the starter's page. It has already
+  //  drawn, off this game's own frame contract, everything CTF and Hidden
+  //  Agenda have in common: the two plates and their numerals (the starter's
+  //  `teams` / `roster` machinery, keyed `crew` and `impostor`), the clock, the
+  //  transport bar, the speed chips, the scrubber, the lull shading, the
+  //  spoilers gate, the momentum strip (the race series in the starter's own
+  //  `lead` shape), the kill feed queue, the banner lane queue, the endcard and
+  //  the locker-room curtain.
   //
-  //  The shared chrome (chrome_common.js) still owns naming, escaping, the
-  //  transport bar, the speed chips, the beat markers, the lull shading, the
-  //  spoilers gate and the momentum graph. This block never re-implements any
-  //  of them.
+  //  This block adds ONLY what this game has that CTF does not: the two plate
+  //  sublines, the roster strip with the spectator role reveal, the vote board,
+  //  the CAUGHT! banner, one feed-row builder per event kind the sim emits, the
+  //  role-reveal table on the endcard, the curtain's station portraits and the
+  //  labelled, clickable scrubber beats.
+  //
+  //  It re-implements NOTHING from up there. Naming, escaping, feed insertion,
+  //  the banner queue, the transport and the beat markers are all reached
+  //  through the context the inherited script hands to install(), exactly as
+  //  the starter's own PAINTBALL block reaches them.
+  //
+  //  NOTE the beat builder is called buildAgendaBeats, NEVER markBeat: a
+  //  game-block `function markBeat` is hoisted over the chrome alias block's
+  //  own `var markBeat = C.markBeat` and silently kills every scrubber beat
+  //  (cogame-tandem, 2026-08-23). tests/test_broadcast.nim asserts the whole
+  //  alias list is untouched below this banner.
   // ============================================================
 
-  var $ = function (id) { return document.getElementById(id); };
+  var CTX = null;
 
-  if (!window.ChromeCommon) {
-    console.error('replay_broadcast: chrome_common.js missing - this page ' +
-      'must be served spliced (native server or dist bundle), not opened raw.');
-    return;
-  }
+  // NOT named `$`: the inherited script aliases the shared chrome's own `$`
+  // with a hoisted `var`, and tests/test_broadcast.nim forbids any game-block
+  // function whose name collides with that alias list.
+  function byId(id) { return document.getElementById(id); }
 
-  var core = null;
-  function send(cmd) { if (core) core.sendCommand(cmd); }
-
-  var lastState = null;
-  var C = window.ChromeCommon({
-    send: function (cmd) { send(cmd); },
-    sendPov: function () { /* Hidden Agenda has no POV lens. */ },
-    getState: function () { return lastState; }
-  });
-
-  // The chrome alias block. NOTE the game block's own beat builder is called
-  // buildAgendaBeats, NEVER markBeat: a game-block `function markBeat` is
-  // hoisted over this `var markBeat` and silently kills every scrubber beat
-  // (cogame-tandem, 2026-08-23).
-  var esc = C.esc;
-  var fmt = C.fmt;
-  var teamCol = C.teamCol;
-  var setName = C.setName;
-  var teamName = C.teamName;
-  var markBeat = C.markBeat;
-  var setVerdict = C.setVerdict;
-  var AMBER = C.AMBER;
-  var RED = C.RED;
-
-  var viewport = $('viewport');
-  var stage = $('stage');
-  var canvas = $('board');
-  var statusEl = $('status');
-  var feedEl = $('killfeed');
-  var bannerEl = $('bannerlane');
-
-  var BOARD_W = (window.CTF_WIRE && window.CTF_WIRE.boardW) || 1080;
-  var BOARD_H = (window.CTF_WIRE && window.CTF_WIRE.boardH) || 760;
-  var BOARD_ASPECT = BOARD_W / BOARD_H;
-
-  // ---- pre-load curtain (the starter's, with this game's plate) ----------
-  var lockerEl = $('lockerroom');
-  var lockerGone = false;
-  var lockerShownAt = Date.now();
-  var LOCKER_MIN_DWELL_MS = 900;
-  function dismissLockerRoom() {
-    if (lockerGone) return;
-    lockerGone = true;
-    var wait = Math.max(0, LOCKER_MIN_DWELL_MS - (Date.now() - lockerShownAt));
-    setTimeout(function () {
-      lockerEl.classList.add('gone');
-      setTimeout(function () { lockerEl.style.display = 'none'; }, 650);
-    }, wait);
-  }
-
-  // ---- plate flag icon (the starter's shape; unknown keys fall back to
-  //      the shared chrome's AMBER) ------------------------------------------
-  function buildFlag(el, color) {
-    el.innerHTML =
-      '<svg viewBox="0 0 26 30" aria-hidden="true">' +
-      '<rect x="4" y="2" width="2" height="26" fill="#2a1f16"/>' +
-      '<g class="cloth"><path d="M6 3 L22 3 L18 9 L22 15 L6 15 Z" fill="' +
-      (color || AMBER) + '"/></g>' +
-      '<rect x="1" y="26" width="10" height="3" fill="#8a7f72"/>' +
-      '</svg>';
-  }
-
-  // ---- feed + banner queues (the starter's signatures, unchanged) --------
-  var MAX_FEED = 4;
-  function pushFeed(row) {
-    feedEl.insertBefore(row, feedEl.firstChild);
-    while (feedEl.children.length > MAX_FEED) {
-      feedEl.removeChild(feedEl.lastChild);
-    }
-    row.style.animationDuration = '250ms';
-    setTimeout(function () {
-      if (row.parentNode) {
-        row.classList.add('leaving');
-        setTimeout(function () {
-          if (row.parentNode) row.parentNode.removeChild(row);
-        }, 300);
-      }
-    }, 2600);
-  }
-  function clearFeed() { feedEl.innerHTML = ''; }
-
-  function feedRow(html, cls) {
-    var row = document.createElement('div');
-    row.className = 'feed-row' + (cls ? ' ' + cls : '');
-    row.innerHTML = html;
-    pushFeed(row);
-  }
-
-  var bannerQueue = [];
-  var bannerBusy = false;
-  function banner(text, cls) {
-    bannerQueue.push({ text: text, cls: cls });
-    pumpBanner();
-  }
-  function pumpBanner() {
-    if (bannerBusy || !bannerQueue.length) return;
-    bannerBusy = true;
-    var b = bannerQueue.shift();
-    var chip = document.createElement('div');
-    chip.className = 'banner-chip ' + b.cls;
-    chip.textContent = b.text;
-    bannerEl.appendChild(chip);
-    chip.style.animationDuration = '300ms';
-    setTimeout(function () {
-      chip.classList.add('leaving');
-      setTimeout(function () {
-        if (chip.parentNode) chip.parentNode.removeChild(chip);
-        bannerBusy = false;
-        pumpBanner();
-      }, 260);
-    }, 1900);
-  }
-  function clearBanners() {
-    bannerQueue = [];
-    bannerEl.innerHTML = '';
-    bannerBusy = false;
-  }
-
-  // ---- names -------------------------------------------------------------
+  // ---- names and colours -------------------------------------------------
   function agenda(s) { return (s && s.agenda) || {}; }
   function aliasOf(s, slot) {
     var r = (s.roster || [])[slot];
@@ -1631,50 +2699,77 @@ button.beat-marker {
     }
     return -1;
   }
+  var BODY_COLOURS = ['#e0523a', '#3f7cc4', '#45a85e', '#ddc531', '#d96ab0'];
   function colourOfAlias(s, alias) {
     var slot = slotOfAlias(s, alias);
-    var colours = ['#e0523a', '#3f7cc4', '#45a85e', '#ddc531', '#d96ab0'];
-    return slot >= 0 ? colours[slot % colours.length] : AMBER;
+    return slot >= 0 ? BODY_COLOURS[slot % BODY_COLOURS.length]
+      : (CTX ? CTX.C.AMBER : '#e8a33d');
   }
-  function roomWords(name) {
-    return String(name || '').toUpperCase();
+  function roomWords(name) { return String(name || '').toUpperCase(); }
+  function htmlEsc(text) { return CTX.esc(text); }
+
+  // ============================================================
+  //  The curtain. The starter's #lockerroom markup and CSS are inherited
+  //  whole; only the scene inside it is this game's - the station plate and
+  //  five colour portraits, sitting where the CTF pose carousels sat.
+  // ============================================================
+  var CURTAIN_ART = './art/lockerroom/';
+  var CURTAIN_COGS = ['red', 'blue', 'green', 'yellow', 'pink'];
+  function buildCurtain() {
+    var bg = byId('lk-bg');
+    var sprites = byId('lk-sprites');
+    if (!bg || !sprites) return;
+    bg.src = CURTAIN_ART + 'bg.jpg';
+    CURTAIN_COGS.forEach(function (colour, index) {
+      var wrap = document.createElement('div');
+      wrap.className = 'lk-boto';
+      wrap.style.left = (9 + index * 17) + '%';
+      wrap.style.top = '52%';
+      wrap.style.width = '15%';
+      wrap.style.height = '26%';
+      var img = document.createElement('img');
+      img.alt = '';
+      img.src = CURTAIN_ART + colour + '.png';
+      img.style.width = '100%';
+      img.style.setProperty('--cyc', (3.6 + index * 0.4) + 's');
+      wrap.appendChild(img);
+      sprites.appendChild(wrap);
+    });
+    function fit() {
+      sprites.style.left = bg.offsetLeft + 'px';
+      sprites.style.top = bg.offsetTop + 'px';
+      sprites.style.width = bg.offsetWidth + 'px';
+      sprites.style.height = bg.offsetHeight + 'px';
+    }
+    bg.addEventListener('load', fit);
+    if (window.ResizeObserver) new ResizeObserver(fit).observe(bg);
+    window.addEventListener('resize', fit);
+    fit();
   }
 
   // ============================================================
-  //  Scorebug: two plates, keyed crew and impostor.
-  //  Crew plate: headline CREW, big number = deposits, label Deposits,
-  //  subline "21 / 32". Impostor plate: headline IMPOSTOR, big number = active
-  //  crew, label Crew left, subline the impostor's alias + policy and a
-  //  freeze-cooldown pip bar.
+  //  Plate sublines. The inherited renderScorebug has already set both plate
+  //  names, both numerals (crew = deposits, impostor = crew left, straight off
+  //  the frame's `teams`) and both squad strips. The sublines are this game's:
+  //  "21 / 32" under the crew plate, and the impostor's alias + policy with a
+  //  freeze-cooldown pip bar under the other.
   // ============================================================
-  var sbBuilt = false;
-  function ensureScorebug() {
-    if (sbBuilt) return;
-    sbBuilt = true;
-    var sides = [$('plates-l'), $('plates-r')];
-    ['crew', 'impostor'].forEach(function (team, i) {
-      var plate = document.createElement('div');
-      plate.className = 'plate ' + team + ' ' + (i === 0 ? 'side-l' : 'side-r');
-      plate.setAttribute('data-team', team);
-      plate.innerHTML =
-        '<div class="flagicon" id="flag-' + team + '"></div>' +
-        '<div class="team-id">' +
-        '<div class="lives-line">' +
-        '<span class="team-name plate-name" id="name-' + team + '">' +
-        team.toUpperCase() + '</span>' +
-        '<span class="lives-label" id="lbl-' + team + '">' +
-        (team === 'crew' ? 'Deposits' : 'Crew left') + '</span>' +
-        '<span class="lives-num" id="lives-' + team + '">&mdash;</span>' +
-        '</div>' +
-        '<div class="ha-sub" id="sub-' + team + '"></div>' +
-        '</div>';
-      sides[i].appendChild(plate);
-      buildFlag($('flag-' + team), teamCol(team) ||
-        (team === 'crew' ? '#3f7cc4' : RED));
-    });
+  function subline(team) {
+    var plate = document.querySelector('.plate[data-team="' + team + '"]');
+    if (!plate) return null;
+    var el = plate.querySelector('.ha-sub');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'ha-sub';
+      var id = plate.querySelector('.team-id');
+      (id || plate).appendChild(el);
+    }
+    return el;
   }
 
   function pipBar(value, total, count) {
+    // `value` is TICKS REMAINING, so a full bar is a ready beam and an empty
+    // one is a beam that just fired.
     var on = total > 0 ? Math.round((1 - value / total) * count) : count;
     var html = '<span class="cooldown">';
     for (var i = 0; i < count; i++) {
@@ -1683,40 +2778,39 @@ button.beat-marker {
     return html + '</span>';
   }
 
-  function renderScorebug(s) {
-    ensureScorebug();
+  function renderSublines(s) {
     var a = agenda(s);
-    setName('name-crew', teamName(s, 'crew', 'CREW'));
-    setName('name-impostor', 'IMPOSTOR');
-    $('lives-crew').textContent = String(a.dep === undefined ? 0 : a.dep);
-    $('lives-impostor').textContent =
-      String(a.crew === undefined ? 0 : a.crew);
-    $('sub-crew').textContent =
-      (a.dep === undefined ? 0 : a.dep) + ' / ' + (a.tgt || 32);
-    var impAlias = a.imp >= 0 ? aliasOf(s, a.imp) : '?';
-    var impPol = a.imp >= 0 ? policyOf(s, a.imp) : '';
-    var cooldownTotal = a.coolMax || 260;
-    $('sub-impostor').innerHTML =
-      esc(impAlias) + (impPol ? ' &middot; ' + esc(impPol) : '') +
-      pipBar(a.cool || 0, cooldownTotal, 5);
+    var crew = subline('crew');
+    var impostor = subline('impostor');
+    if (crew) {
+      crew.textContent = (a.dep === undefined ? 0 : a.dep) + ' / ' +
+        (a.tgt || 32);
+    }
+    if (impostor) {
+      var alias = a.imp >= 0 ? aliasOf(s, a.imp) : '?';
+      var policy = a.imp >= 0 ? policyOf(s, a.imp) : '';
+      impostor.innerHTML = htmlEsc(alias) +
+        (policy ? ' &middot; ' + htmlEsc(policy) : '') +
+        pipBar(a.cool || 0, a.coolMax || 260, 5);
+    }
   }
 
-  // ---- clock: spelled out, never "M4" -----------------------------------
-  function renderClock(s) {
+  // ---- the clock caption: spelled out, never "M4" ------------------------
+  function renderCaption(s) {
     var a = agenda(s);
-    $('clock-time').textContent = 'TICK ' + s.t + ' / ' + (s.mt || s.mx);
-    var caption;
+    var el = byId('clock-caption');
+    if (!el) return;
+    byId('clock-time').textContent = 'TICK ' + s.t + ' / ' + (s.mt || s.mx);
     if (s.ph === 'gameover') {
-      caption = 'FINAL';
+      el.textContent = 'FINAL';
     } else if (a.m && a.m.phase > 0) {
       var stage = a.m.phase >= 5 ? 'RESOLVED'
         : (a.m.phase >= 4 ? 'VOTES CHANGING'
           : (a.m.phase >= 3 ? 'VOTING' : 'MEETING CALLED'));
-      caption = 'MEETING ' + a.m.n + ' \u2014 ' + stage;
+      el.textContent = 'MEETING ' + a.m.n + ' \u2014 ' + stage;
     } else {
-      caption = 'DEPOSITS ' + (a.dep || 0) + ' / ' + (a.tgt || 32);
+      el.textContent = 'DEPOSITS ' + (a.dep || 0) + ' / ' + (a.tgt || 32);
     }
-    $('clock-caption').textContent = caption;
   }
 
   // ============================================================
@@ -1731,7 +2825,8 @@ button.beat-marker {
       .join('|') + '#' + states.join(',') + '#' + a.imp;
     if (key === rosterKey) return;
     rosterKey = key;
-    var host = $('rosterstrip');
+    var host = byId('rosterstrip');
+    if (!host) return;
     var html = '';
     (s.roster || []).forEach(function (r, i) {
       var state = states[i] || 'active';
@@ -1741,34 +2836,35 @@ button.beat-marker {
         (i === a.imp ? ' imp' : '') + '" style="--tc:' +
         colourOfAlias(s, r.name) + '">' +
         '<span class="rglyph">' + glyph + '</span>' +
-        '<span class="ralias">' + esc(r.name) + '</span>' +
-        (r.pol ? '<span class="rpol">' + esc(r.pol) + '</span>' : '') +
+        '<span class="ralias">' + htmlEsc(r.name) + '</span>' +
+        (r.pol ? '<span class="rpol">' + htmlEsc(r.pol) + '</span>' : '') +
         '</span>';
     });
     host.innerHTML = html;
   }
 
   // ============================================================
-  //  Vote board: five VOTER -> TARGET rows, greyed until the reveal tick,
-  //  filled simultaneously, flipped to amber on any row that changes at the
-  //  switch tick. This is where "live vote changes in the last ticks" is
-  //  legible.
+  //  Vote board: one VOTER -> TARGET row per active seat, greyed until the
+  //  reveal tick, filled simultaneously, flipped to amber on any row that
+  //  changes at the switch tick, with the resolve countdown under it. This is
+  //  where "live vote changes in the last ticks" is legible.
   // ============================================================
   var voteSnapshot = {};
+  var SHORT = { RED: 'RED', BLUE: 'BLU', GREEN: 'GRN', YELLOW: 'YEL',
+    PINK: 'PNK' };
   function shortAlias(alias) {
-    var map = { RED: 'RED', BLUE: 'BLU', GREEN: 'GRN', YELLOW: 'YEL',
-      PINK: 'PNK' };
-    return map[alias] || String(alias).slice(0, 3);
+    return SHORT[alias] || String(alias).slice(0, 3);
   }
   function renderVoteBoard(s) {
     var a = agenda(s);
-    var board = $('voteboard');
+    var board = byId('voteboard');
+    if (!board) return;
     var meeting = a.m || {};
     var on = (meeting.phase || 0) > 0;
     board.classList.toggle('on', on);
     if (!on) { voteSnapshot = {}; return; }
-    var tiny = stage.classList.contains('tiny');
-    $('vb-head').textContent = 'MEETING ' + (meeting.n || 0) + ' \u2014 ' +
+    var tiny = byId('stage').classList.contains('tiny');
+    byId('vb-head').textContent = 'MEETING ' + (meeting.n || 0) + ' \u2014 ' +
       (meeting.cause === 'witness' ? 'WITNESSED FREEZE' : 'SCHEDULED');
     var votes = meeting.votes || {};
     var tally = meeting.tally || {};
@@ -1785,28 +2881,37 @@ button.beat-marker {
       html += '<div class="vrow' + (target !== undefined ? ' filled' : '') +
         (changed ? ' switched' : '') + '" style="--tc:' +
         colourOfAlias(s, r.name) + '">' +
-        '<span class="vfrom">' + esc(name) + '</span>' +
+        '<span class="vfrom">' + htmlEsc(name) + '</span>' +
         '<span class="varrow">&rarr;</span>' +
-        '<span class="vto">' + esc(to) + '</span>' +
+        '<span class="vto">' + htmlEsc(to) + '</span>' +
         '<span class="vtally">' + (tally[r.name] ? '\u25cf'.repeat(
           Math.min(4, tally[r.name])) : '') + '</span>' +
         '</div>';
     });
-    $('vb-rows').innerHTML = html;
-    $('vb-count').textContent = meeting['in'] > 0
+    byId('vb-rows').innerHTML = html;
+    byId('vb-count').textContent = meeting['in'] > 0
       ? 'RESOLVES IN ' + meeting['in'] : 'RESOLVED';
     voteSnapshot = {};
     Object.keys(votes).forEach(function (k) { voteSnapshot[k] = votes[k]; });
   }
 
   // ============================================================
-  //  Feed + banners, one builder per event kind the sim emits.
+  //  Feed rows and banners, one builder per event kind the sim emits. Rows go
+  //  into the INHERITED queue through ctx.pushFeed(row) - one argument, the row
+  //  element, the starter's own signature, never a re-implementation (cogball
+  //  0.1.4) - and banners through ctx.banner(text, cls).
   // ============================================================
-  function applyEvent(e, s) {
-    var colour = function (alias) { return colourOfAlias(s, alias); };
+  function feedRow(html, cls) {
+    var row = document.createElement('div');
+    row.className = 'feed-row' + (cls ? ' ' + cls : '');
+    row.innerHTML = html;
+    CTX.pushFeed(row);
+  }
+
+  function applyAgendaEvent(e, s) {
     var tint = function (alias) {
-      return '<span style="color:' + colour(alias) + '">' + esc(alias) +
-        '</span>';
+      return '<span style="color:' + colourOfAlias(s, alias) + '">' +
+        htmlEsc(alias) + '</span>';
     };
     switch (e.k) {
       case 'freeze':
@@ -1814,43 +2919,42 @@ button.beat-marker {
         var freezer = aliasOf(s, e.seat);
         var where = roomWords(e.room || '');
         if (e.witnesses && e.witnesses.length) {
-          banner('CAUGHT! ' + freezer + ' FROZE ' + victim + ' \u2014 ' +
+          CTX.banner('CAUGHT! ' + freezer + ' FROZE ' + victim + ' \u2014 ' +
             e.witnesses.join(' + ') + ' SAW IT', 'caught');
         } else {
-          banner(victim + ' WAS FROZEN \u2014 NOBODY SAW IT', 'quiet');
+          CTX.banner(victim + ' WAS FROZEN \u2014 NOBODY SAW IT', 'quiet');
         }
         feedRow(tint(freezer) + ' FROZE ' + tint(victim) +
-          (where ? ' IN ' + esc(where) : ''), 'flagkill');
-        break;
+          (where ? ' IN ' + htmlEsc(where) : ''), 'flagkill');
+        return true;
       case 'witness':
         feedRow(tint(e.witness) + ' SAW IT');
-        break;
+        return true;
       case 'deposit':
         if (e.total % 4 === 0) {
-          feedRow('DEPOSITS ' + e.total + ' / ' +
-            (agenda(s).tgt || 32));
+          feedRow('DEPOSITS ' + e.total + ' / ' + (agenda(s).tgt || 32));
         }
-        break;
+        return true;
       case 'fakedeposit':
         feedRow(tint(aliasOf(s, e.seat)) +
           ' DROPPED A GEM &mdash; THE COUNTER DIDN\u2019T MOVE');
-        break;
+        return true;
       case 'meeting':
-        banner('MEETING ' + e.n + ' CALLED \u2014 ' +
+        CTX.banner('MEETING ' + e.n + ' CALLED \u2014 ' +
           (e.cause === 'witness' ? 'WITNESSED FREEZE' : 'SCHEDULED'),
           'meeting');
         feedRow('MEETING ' + e.n + ' CALLED &mdash; ' +
           (e.cause === 'witness' ? 'WITNESSED FREEZE' : 'SCHEDULED'));
-        break;
+        return true;
       case 'say':
-        feedRow(tint(aliasOf(s, e.seat)) + ' &ldquo;' + esc(e.text) +
+        feedRow(tint(aliasOf(s, e.seat)) + ' &ldquo;' + htmlEsc(e.text) +
           '&rdquo;');
-        break;
+        return true;
       case 'vote':
         feedRow(tint(aliasOf(s, e.seat)) +
           (e.phase === 'switch' ? ' SWITCHED &rarr; ' : ' &rarr; ') +
-          esc(e.target === 'skip' ? 'SKIP' : e.target));
-        break;
+          htmlEsc(e.target === 'skip' ? 'SKIP' : e.target));
+        return true;
       case 'eject':
         if (e.target) {
           var counts = [];
@@ -1863,14 +2967,14 @@ button.beat-marker {
           feedRow(tint(e.target) + ' EJECTED ' + score + ' &mdash; ' +
             (e.wasImpostor ? 'THE IMPOSTOR' : 'CREW'),
             e.wasImpostor ? 'flagkill' : '');
-          banner(e.target + ' EJECTED \u2014 ' +
+          CTX.banner(e.target + ' EJECTED \u2014 ' +
             (e.wasImpostor ? 'THE IMPOSTOR' : 'A CREWMATE'),
             e.wasImpostor ? 'caught' : 'quiet');
         } else {
-          feedRow('NOBODY EJECTED &mdash; ' + esc(String(e.outcome)
+          feedRow('NOBODY EJECTED &mdash; ' + htmlEsc(String(e.outcome)
             .toUpperCase()));
         }
-        break;
+        return true;
       case 'order':
         var steps = (e.plan || []).map(function (p) {
           return p.job + (p.at ? ' ' + p.at : '') +
@@ -1878,18 +2982,19 @@ button.beat-marker {
         }).join(', ');
         var tag = (e.source === 'fallback' || e.source === 'scripted' ||
           e.source === 'budget') ? ' <span class="badge">auto</span>' : '';
-        feedRow(tint(aliasOf(s, e.seat)) + ' &rarr; ' + esc(steps) +
-          (e.hunch ? ' &ldquo;' + esc(e.hunch) + '&rdquo;' : '') + tag);
-        break;
+        feedRow(tint(aliasOf(s, e.seat)) + ' &rarr; ' + htmlEsc(steps) +
+          (e.hunch ? ' &ldquo;' + htmlEsc(e.hunch) + '&rdquo;' : '') + tag);
+        return true;
       default:
-        break;
+        return false;
     }
   }
 
   // ============================================================
   //  Scrubber beats. buildAgendaBeats ingests state.beats on the first HUD
-  //  frame and calls the chrome's aliased markBeat for each; upgradeBeatButtons
-  //  is the post-pass that turns every placed .beat-marker div into a LABELLED,
+  //  frame and calls the INHERITED chrome's markBeat for each (through the
+  //  context, so this block never shadows the alias); upgradeBeatButtons is the
+  //  post-pass that turns every placed .beat-marker div into a LABELLED,
   //  CLICKABLE button wired to seek(tick). There is CSS for every kind the game
   //  emits - meeting, freeze, caught, eject, deposit, gameover - and no others
   //  are emitted.
@@ -1916,9 +3021,9 @@ button.beat-marker {
         default: label = b.k + ' at tick ' + b.t; break;
       }
       beatLabels[b.t + '|' + b.k] = label;
-      markBeat(b.t, b.k, '');
+      CTX.C.markBeat(b.t, b.k, '');
       if (b.k === 'gameover') {
-        setVerdict({
+        CTX.C.setVerdict({
           t: b.t,
           winner: b.winner === 'none' ? '' : b.winner,
           draw: b.winner === 'none'
@@ -1927,8 +3032,10 @@ button.beat-marker {
     }
   }
 
+  function seekTo(tick) { CTX.send('s:' + Math.max(0, Math.round(tick))); }
+
   function upgradeBeatButtons(s) {
-    var host = $('scrub');
+    var host = byId('scrub');
     var placed = host.querySelectorAll('div.beat-marker');
     for (var i = 0; i < placed.length; i++) {
       (function (div) {
@@ -1958,10 +3065,10 @@ button.beat-marker {
   }
 
   function applyBeatSpoilers(s) {
-    // The chrome's own spoiler gate holds the DIVs it placed; these buttons
+    // The inherited spoiler gate holds the DIVs it placed; these buttons
     // replaced them, so the gate is re-applied here against the same rule.
-    var show = C.getSpoilers();
-    var buttons = $('scrub').querySelectorAll('button.beat-marker');
+    var show = CTX.C.getSpoilers();
+    var buttons = byId('scrub').querySelectorAll('button.beat-marker');
     for (var i = 0; i < buttons.length; i++) {
       var hide = !show && buttons[i].__tick > s.t;
       buttons[i].style.display = hide ? 'none' : '';
@@ -1969,19 +3076,19 @@ button.beat-marker {
   }
 
   // ============================================================
-  //  Endcard: the verdict in words, then the role reveal table, then the line
-  //  of counters. Dismissed by every seek.
+  //  Endcard. The inherited #endcard is shown and hidden by the inherited
+  //  chrome (state-driven off s.ph, so EVERY seek takes it down); this block
+  //  writes what it says: the verdict in words, the role reveal table, and the
+  //  line of counters. The starter's per-team stat panel has no counterpart
+  //  here, so #ec-teams is emptied rather than left holding CTF columns.
   // ============================================================
-  var endcardShown = false;
-  function hideEndcard() {
-    endcardShown = false;
-    $('endcard').classList.remove('on');
-  }
-  function renderEndcard(s) {
+  var endcardKey = '';
+  function renderAgendaEndcard(s) {
     var over = s.over;
-    if (!over) { hideEndcard(); return; }
-    if (endcardShown) return;
-    endcardShown = true;
+    if (!over) { endcardKey = ''; return; }
+    var key = over.ending + '|' + over.deposits;
+    if (key === endcardKey) return;
+    endcardKey = key;
     var headline;
     switch (over.ending) {
       case 'crew_deposits':
@@ -1996,8 +3103,8 @@ button.beat-marker {
       case 'forfeit': headline = 'FORFEIT'; break;
       default: headline = String(over.ending || '').toUpperCase(); break;
     }
-    $('ec-headline').textContent = headline;
-    $('ec-wincond').textContent =
+    byId('ec-headline').textContent = headline;
+    byId('ec-wincond').textContent =
       'Crew win at ' + (over.depositTarget || 32) + ' deposits or by ' +
       'ejecting the impostor. The impostor wins at one crewmate left.';
     var roles = agenda(s).roles || [];
@@ -2006,174 +3113,49 @@ button.beat-marker {
       var role = roles[i] || 'crew';
       html += '<div class="erow' + (role === 'impostor' ? ' imp' : '') +
         '" style="--tc:' + colourOfAlias(s, r.name) + '">' +
-        '<span class="ealias">' + esc(r.name) + '</span>' +
-        '<span class="erole">' + esc(role) + '</span>' +
-        '<span class="epol">' + esc(r.pol || '') + '</span>' +
+        '<span class="ealias">' + htmlEsc(r.name) + '</span>' +
+        '<span class="erole">' + htmlEsc(role) + '</span>' +
+        '<span class="epol">' + htmlEsc(r.pol || '') + '</span>' +
         '</div>';
     });
-    $('ec-roles').innerHTML = html;
-    $('ec-how').textContent =
+    byId('ec-roles').innerHTML = html;
+    byId('ec-teams').innerHTML = '';
+    byId('ec-how').textContent =
       over.freezes + ' freeze' + (over.freezes === 1 ? '' : 's') +
       ' \u00b7 ' + over.witnessed + ' witnessed \u00b7 ' +
       over.ejections + ' ejection' + (over.ejections === 1 ? '' : 's') +
       ' (' + (over.wrong ? over.wrong + ' wrong' : 'right') + ') \u00b7 ' +
       over.fake + ' fake deposits \u00b7 ' + over.meetings + ' meetings';
-    $('ec-replay').textContent = 'Press , to replay from the start.';
-    $('endcard').classList.add('on');
+    byId('ec-replay').textContent = 'Press , to replay from the start.';
   }
 
   // ============================================================
-  //  Frame ingest
+  //  The three entry points the inherited script calls.
   // ============================================================
-  var lastTick = -1;
-  function onFrame(txt) {
-    var s;
-    try { s = JSON.parse(txt); } catch (e) { return; }
-    lastState = s;
-    dismissLockerRoom();
-
-    var stride = (s.sp || 1) * (s.ff ? 8 : 1);
-    var jumped = (s.t < lastTick) ||
-      (lastTick >= 0 && s.t - lastTick > stride * 4 + 2);
-    if (jumped) { clearFeed(); clearBanners(); hideEndcard(); }
-    lastTick = s.t;
-
-    C.ingestLeadSeries(s);
-    C.ingestLullSpans(s);
-    buildAgendaBeats(s);
-
-    renderScorebug(s);
-    renderClock(s);
-    C.renderTransport(s);
-    upgradeBeatButtons(s);
-    renderRoster(s);
-    renderVoteBoard(s);
-
-    if (s.events && s.events.length && !jumped) {
-      for (var i = 0; i < s.events.length; i++) applyEvent(s.events[i], s);
+  window.AgendaChrome = {
+    install: function (ctx) {
+      CTX = ctx;
+      buildCurtain();
+    },
+    frame: function (s, ctx, jumped) {
+      CTX = ctx || CTX;
+      buildAgendaBeats(s);
+      renderSublines(s);
+      renderCaption(s);
+      renderRoster(s);
+      renderVoteBoard(s);
+      upgradeBeatButtons(s);
+      renderAgendaEndcard(s);
+    },
+    event: function (e, s, ctx) {
+      CTX = ctx || CTX;
+      return applyAgendaEvent(e, s);
     }
-    renderEndcard(s);
-  }
-
-  function onStatus(st) {
-    statusEl.textContent = st;
-    statusEl.classList.toggle('show', st !== 'open');
-  }
-
-  // ============================================================
-  //  Core + transport
-  // ============================================================
-  var replayAdapter = window.HiddenAgendaStaticReplay || null;
-  var coreConfig = {
-    canvas: canvas,
-    onText: function (txt) { onFrame(txt); },
-    onStatus: function (st) { onStatus(st); },
-    onFirstFrame: function () { core.setViewportFit(); },
-    onTransform: function () { }
   };
-  core = replayAdapter
-    ? replayAdapter.createCore(coreConfig)
-    : window.BroadcastCore.create(coreConfig);
 
-  function seekTo(tick) {
-    hideEndcard();
-    send('s:' + Math.max(0, Math.round(tick)));
-  }
-
-  $('btn-play').addEventListener('click', function () { send(' '); });
-  $('btn-restart').addEventListener('click', function () {
-    hideEndcard(); send(',');
-  });
-  $('btn-back').addEventListener('click', function () {
-    hideEndcard(); send('b');
-  });
-  $('btn-fwd').addEventListener('click', function () {
-    hideEndcard(); send('.');
-  });
-  $('btn-end').addEventListener('click', function () {
-    hideEndcard(); send('e');
-  });
-  $('btn-loop').addEventListener('click', function () { send('r'); });
-  $('btn-skip').addEventListener('click', function () { send('f'); });
-
-  $('scrub').addEventListener('click', function (ev) {
-    var rect = this.getBoundingClientRect();
-    var frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
-    var s = lastState;
-    if (!s) return;
-    var st = Math.max(0, s.st || 0);
-    var mx = Math.max(st + 1, s.mx || 1);
-    seekTo(st + Math.round(frac * (mx - st)));
-  });
-
-  window.addEventListener('keydown', function (ev) {
-    var k = ev.key;
-    if (k === ' ') { send(' '); ev.preventDefault(); }
-    else if (k === ',' || k === '<') { hideEndcard(); send(','); }
-    else if (k === '.' || k === '>') { hideEndcard(); send('.'); }
-    else if (k === 'b') { hideEndcard(); send('b'); }
-    else if (k === 'e') { hideEndcard(); send('e'); }
-    else if (k === 'r') send('r');
-    else if (k === 'f') send('f');
-    else if (k === 'o') C.setSpoilers(!C.getSpoilers());
-    else if (k === '+' || k === '=') send('+');
-    else if (k === '-' || k === '_') send('-');
-  });
-
-  // ============================================================
-  //  Layout. relayout() sets --hudscale, --topband and --band on :root and
-  //  reserves each band's measured height, so no overlay ever sits inside the
-  //  transport band and the endcard stops at bottom: var(--band, 0px).
-  // ============================================================
-  function relayout() {
-    var boxW = viewport.clientWidth, boxH = viewport.clientHeight;
-    if (!boxW || !boxH) return;
-    var scorebug = $('scorebug');
-    var transport = $('transport');
-    var root = document.documentElement;
-    var topBand =
-      parseFloat(getComputedStyle(root).getPropertyValue('--topband')) || 0;
-    var band =
-      parseFloat(getComputedStyle(root).getPropertyValue('--band')) || 0;
-    for (var pass = 0; pass < 4; pass++) {
-      var prevTop = topBand, prevBand = band;
-      var availH = Math.max(1, boxH - topBand - band);
-      var boardW, boardH;
-      if (boxW / availH > BOARD_ASPECT) {
-        boardH = availH; boardW = Math.round(availH * BOARD_ASPECT);
-      } else {
-        boardW = boxW; boardH = Math.round(boxW / BOARD_ASPECT);
-      }
-      stage.style.width = boardW + 'px';
-      stage.style.height = (boardH + topBand + band) + 'px';
-      var scale = Math.max(0.5, Math.min(1.6, boardW / 760));
-      root.style.setProperty('--hudscale', scale.toFixed(3));
-      stage.classList.toggle('tiny', boardW <= 620);
-      topBand = scorebug ? scorebug.offsetHeight : 0;
-      band = transport ? transport.offsetHeight : 0;
-      root.style.setProperty('--topband', topBand + 'px');
-      root.style.setProperty('--band', band + 'px');
-      if (Math.abs(topBand - prevTop) < 0.5 &&
-          Math.abs(band - prevBand) < 0.5) break;
-    }
-    if (core) core.setViewportFit();
-  }
-  if (window.ResizeObserver) new ResizeObserver(relayout).observe(viewport);
-  window.addEventListener('resize', relayout);
-
-  ensureScorebug();
-  relayout();
-  core.start();
-
-  // Exposed for tools/ci/renderer_fixture.html, which drives the same builders
-  // against a worst-case synthetic frame (full-cap say/hunch/notes on all five
-  // seats, the vote board at five rows, the CAUGHT! banner at full length).
-  window.HiddenAgendaChrome = {
-    onFrame: onFrame,
-    relayout: relayout,
-    buildAgendaBeats: buildAgendaBeats,
-    upgradeBeatButtons: upgradeBeatButtons
-  };
+  // The same object under this game's full name, so a harness can drive the
+  // block's builders directly against a synthetic worst-case frame.
+  window.HiddenAgendaChrome = window.AgendaChrome;
 })();
 
 </script>

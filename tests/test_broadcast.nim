@@ -224,6 +224,62 @@ block pageProvenance:
   check("flex: 1 1 auto;" in page and "min-width: 3.2em;" in page,
     "the plate name must survive a 360px featured-match iframe")
 
+block theScriptIsTheStartersToo:
+  ## Id-presence is not provenance: cogame-gridlock shipped a 329-line page
+  ## that reused every starter id and passed an id test. The page must BE the
+  ## starter's -- its CSS, its body markup AND its page script -- with this
+  ## game's block appended under the banner comment.
+  ## The starter's page is 4,660 lines. The removals the note lists account for
+  ## roughly 1,500 of them (the first-person raycaster alone is ~1,100), so a
+  ## faithful fork lands near 3,100 with this game's block appended. Anything
+  ## far below that is a rewrite. The starter tree is not on a CI runner, so
+  ## the number is pinned here rather than measured.
+  const StarterPageLines = 4660
+  let page = readFile(RepoRoot / "client" / "replay_broadcast.html")
+  let lines = page.splitLines().len
+  check(lines * 2 > StarterPageLines,
+    "a page a fraction of the starter's size is a rewrite: " & $lines &
+    " lines against the starter's " & $StarterPageLines)
+
+  ## The starter's own page script, function by function: the locker-room
+  ## curtain, the tempo levers, the beat pulse, the scorebug machinery, the
+  ## feed and banner queues, the endcard, the transport and the relayout.
+  for fn in ["function animFactor(", "function dwellFloor(",
+      "function beatPulse(", "function dismissLockerRoom(",
+      "function postToShell(", "function syncBoardAspect(",
+      "function buildFlag(", "function onFrame(", "function onStatus(",
+      "function seatLivesLeft(", "function renderSquad(",
+      "function ensureScorebug(", "function renderScorebug(",
+      "function updateFlag(", "function shortName(", "function applyEvent(",
+      "function onKill(", "function pushFeed(", "function clearFeed(",
+      "function banner(", "function pumpBanner(", "function clearBanners(",
+      "function endcardWinCondition(", "function renderEndcardRows(",
+      "function ensureEndcardTeams(", "function renderEndcard(",
+      "function togglePlay(", "function seekToFraction(",
+      "function relayout("]:
+    check(fn in page,
+      "the inherited page script must still carry `" & fn & "...`")
+  check("if (!window.ChromeCommon) {" in page,
+    "including the starter's own missing-splice guard")
+  check("PB_CTX = {" in page,
+    "and the context the appended block rides, built beside the starter's")
+
+  ## ...minus exactly the blocks the design note removes, script side.
+  for gone in ["renderFpv", "renderPov(", "renderMismatch", "ingestFpMap",
+      "syncViewUi", "ZOOM_STEP", "panCellBoardPx", "COG_ART",
+      "CtfStaticReplay", "minimapBox", "zoomSlider"]:
+    check(gone notin page,
+      "the removed block's identifier `" & gone & "` must be gone too")
+
+  ## The appended block is APPENDED: everything the game adds sits after the
+  ## banner comment, and the banner sits after the inherited script.
+  let banner = page.find("HIDDEN-AGENDA additions to the inherited " &
+    "coworld-ctf chrome\n")
+  check(banner > 0, "the banner comment separates the two halves")
+  check(page.find("window.AgendaChrome = {") > banner,
+    "the game block is appended UNDER the banner, never spliced into the " &
+    "inherited script")
+
 block noScopeDuplication:
   ## A game-block `function markBeat` is HOISTED over the chrome alias block's
   ## `var markBeat = C.markBeat` and silently kills every scrubber beat

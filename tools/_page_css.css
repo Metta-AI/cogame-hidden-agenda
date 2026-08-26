@@ -68,6 +68,7 @@
   z-index: 8;
   pointer-events: none;
   max-width: 96%;
+  overflow: hidden;
 }
 .rchip {
   display: flex;
@@ -87,7 +88,16 @@
 .rchip .rglyph { color: var(--tc, var(--paper)); font-family: var(--pixfont); }
 .rchip.frozen { opacity: 0.62; }
 .rchip.ejected { opacity: 0.35; text-decoration: line-through; }
-.rchip .rpol { color: var(--paper-dim); }
+/* The alias is the identity and never shrinks; the POLICY name is what gives
+   way when five chips do not fit the board width, so the strip clips a name
+   rather than running off the stage. */
+.rchip { min-width: 0; }
+.rchip .rpol {
+  color: var(--paper-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* --- vote board: five VOTER -> TARGET rows, centre-right of the board -- */
 #voteboard {
