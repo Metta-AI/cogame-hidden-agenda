@@ -229,6 +229,36 @@ block theDeadlineSettlesEarly:
   for score in sim.scores:
     check(score == 0, "and all scores 0")
 
+block frozenAndEjectedSeatsAreToldTheyCannotAct:
+  ## docs/POLICIES.md and the manifest's policies page both promise that a
+  ## frozen or ejected seat receives a frame with `canAct: false`; seatView
+  ## emitted no such key and left the seat to infer it from `you.state`.
+  var sim = rig()
+  var frame = seatView(sim, 0, "opening")
+  check(frame{"canAct"}.getBool() == true,
+    "an active seat in play can act")
+  check(frame{"canVote"}.getBool() == false,
+    "and cannot vote outside a meeting")
+
+  sim.openMeetingForTest(mcCadence)
+  frame = seatView(sim, 0, "meeting")
+  check(frame{"canAct"}.getBool() and frame{"canVote"}.getBool(),
+    "an active seat in a meeting can do both")
+
+  sim.cogs[1].state = csFrozen
+  sim.cogs[2].state = csEjected
+  for slot in [1, 2]:
+    let dead = seatView(sim, slot, "meeting")
+    check(dead{"canAct"}.getBool() == false,
+      "a " & $sim.cogs[slot].state & " seat is told canAct: false")
+    check(dead{"canVote"}.getBool() == false, "and canVote: false")
+    check(dead{"you"}{"state"}.getStr() in ["csFrozen", "csEjected",
+      "frozen", "ejected"], "and still carries you.state")
+  ## And that is the truth: neither seat is in the batch.
+  let seats = sim.activeSeats()
+  check(1 notin seats and 2 notin seats,
+    "the flags agree with activeSeats()")
+
 block theRetryBatchAndTheFallbackAreDriven:
   ## Every driver block above constructs a client with no credentials, which
   ## short-circuits to the scripted fallback BEFORE the batch loop -- so

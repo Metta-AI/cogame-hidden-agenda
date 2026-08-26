@@ -265,12 +265,20 @@ proc seatView*(sim: Sim, slot: int, cause: string): JsonNode =
     else:
       "there is NO chat in this variant. Your vote is your only signal."
 
+  ## A frozen or ejected seat still receives every frame -- the socket stays
+  ## open for the whole episode -- but it is in no decision batch and its reply
+  ## is read by nobody. Say so IN THE FRAME rather than leaving the seat to
+  ## infer it from `you.state`: docs/POLICIES.md and the manifest's policies
+  ## page both promise these two flags.
+  let acting = cog.state == csActive
   result = %*{
     "type": "state", "protocol": Protocol, "slot": slot,
     "role": $cog.role, "name": Aliases[slot],
     "tick": sim.tick, "maxTicks": sim.config.maxTicks,
     "decision": sim.decisions, "cause": cause,
     "phase": (if sim.inMeeting: "meeting" else: "play"),
+    "canAct": acting,
+    "canVote": acting and sim.inMeeting,
     "chat": sim.config.chat,
     "you": you, "station": stationBlock(sim), "roster": roster,
     "inView": inView, "lastSeen": lastSeen, "togetherTicks": together,

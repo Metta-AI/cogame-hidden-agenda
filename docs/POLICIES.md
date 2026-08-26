@@ -78,8 +78,10 @@ seed; the impostor slot; and anything about the league or the other policies.
 the same predicate the sim's legality check applies. What it does **not** get is
 who can currently see *it*. That is the risk it is taking.
 
-A **frozen or ejected** seat receives a frame with `canAct: false` and is not
-included in any decision batch. Its socket stays open until `final`.
+A **frozen or ejected** seat receives a frame with `canAct: false` and
+`canVote: false`, and is not included in any decision batch. Its socket stays
+open until `final`. An active seat carries `canAct: true`, and `canVote: true`
+only while a meeting is open.
 
 ## What you reply with
 
