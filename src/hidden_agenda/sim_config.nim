@@ -169,10 +169,14 @@ proc update*(config: var GameConfig, configJson: string) =
     config.players = @[]
     for player in node["players"]:
       config.players.add(PlayerConfig(name: player{"name"}.getStr()))
+  ## `variant` and `model` are pinned verbatim into the replay's config
+  ## document (`replayConfigJson`), so they get the same rune-safe cap as every
+  ## other recorded string rather than arriving from the runtime config with
+  ## whatever length and byte boundaries it likes.
   if node.hasKey("variant"):
-    config.variant = node["variant"].getStr()
+    config.variant = cleanText(node["variant"].getStr(), MaxPolicyLen)
   if node.hasKey("model"):
-    config.model = node["model"].getStr()
+    config.model = cleanText(node["model"].getStr(), MaxPolicyLen)
   intField("seed", config.seed)
   intField("num_agents", config.numAgents)
   intField("impostorSlot", config.impostorSlot)

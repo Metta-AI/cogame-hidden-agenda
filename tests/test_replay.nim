@@ -152,6 +152,47 @@ block runeTruncation:
       discard
   check(sawSay, "the chat variant must actually record a say")
 
+block policyNamesAndVariantAreCapped:
+  ## Not every recorded string comes from a seat's reply. The POLICY NAMES
+  ## arrive from `config.players[].name` and reach `policyNames[]`,
+  ## `results.names[]`, every `reveal` row's `policy` field and the viewer's
+  ## roster chips; `variant` and `model` are pinned into the replay's config
+  ## document. All of them are platform-supplied and were recorded verbatim,
+  ## so `MaxPolicyLen` was declared and referenced nowhere. Feed multi-byte
+  ## runes well past the cap and read the bytes back.
+  proc runic(count: int): string =
+    for _ in 0 ..< count:
+      result.add("\u00e9\u4e2d\u2026")
+
+  var config = baseConfig(11, "hidden-agenda-notalk")
+  config.maxTicks = 120
+  config.impostorSlot = 4
+  config.players = @[]
+  for alias in Aliases:
+    config.players.add(PlayerConfig(name: alias & "-" & runic(90)))
+  var overlay = %*{"variant": runic(90), "model": runic(90)}
+  config.update($overlay)
+
+  let sim = playEpisode(config, uniformKinds(skMiner))
+  let bytes = replayBytes(sim)
+  check(utf8Valid(bytes), "the replay stays strict UTF-8")
+  let doc = parseJson(bytes)
+  for node in doc{"policyNames"}:
+    check(node.getStr().runeLen <= MaxPolicyLen,
+      "a policy name is capped at MaxPolicyLen in RUNES, got " &
+      $node.getStr().runeLen)
+    check(utf8Valid(node.getStr()), "and never cut mid-rune")
+  for node in doc{"results"}{"names"}:
+    check(node.getStr().runeLen <= MaxPolicyLen, "results.names is capped too")
+  for row in doc{"events"}:
+    if row{"k"}.getStr() == "reveal":
+      check(row{"policy"}.getStr().runeLen <= MaxPolicyLen,
+        "and the reveal row's policy field")
+  check(doc{"config"}{"variant"}.getStr().runeLen <= MaxPolicyLen,
+    "the replay's config.variant is capped")
+  check(doc{"config"}{"model"}.getStr().runeLen <= MaxPolicyLen,
+    "and config.model")
+
 block eventsReDeriveEveryFrame:
   ## Acceptance item 2, the frame-by-frame half: replaying the recorded EVENTS
   ## through the sim's own rules must reproduce the recorded per-tick state on

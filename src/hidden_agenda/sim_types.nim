@@ -6,7 +6,7 @@
 ## there is no float anywhere in the step path, which is what makes a seed
 ## reproduce a replay bit-exactly on native and under emscripten alike.
 
-import std/[strutils]
+import std/[strutils, unicode]
 
 const
   GameVersion* = "1"
@@ -32,7 +32,7 @@ const
   Colors*: array[Seats, string] = ["red", "blue", "green", "yellow", "pink"]
   ShortAliases*: array[Seats, string] = ["RED", "BLU", "GRN", "YEL", "PNK"]
 
-  ## Reply caps (runes, never bytes — see labels.cleanText).
+  ## Reply caps (runes, never bytes — see `cleanText` below).
   MaxSayLen* = 90
   MaxHunchLen* = 80
   MaxNotesLen* = 240
@@ -46,6 +46,24 @@ const
   FreezeFxTicks* = 6
   WitnessFlashTicks* = 24
   BannerTicks* = 48
+
+# ---------------------------------------------------------------------------
+# Rune-safe text. NEVER slice a recorded string by byte index: a byte cut puts
+# invalid UTF-8 in the replay and only a strict parser finds it (bullwhip,
+# 2026-08-22). This lives HERE, in the base module, so every layer that writes
+# a string into the replay can reach it — including `sim_config`, which pins
+# `variant` and `model` into the replay's config document.
+# ---------------------------------------------------------------------------
+
+proc cleanText*(text: string, limit: int): string =
+  result = text.strip()
+  if result.runeLen <= limit:
+    return
+  result = result.runeSubStr(0, limit - 1) & "\u2026"
+
+proc oneLine*(text: string, limit: int): string =
+  cleanText(text.replace("\n", " ").replace("\r", " "), limit)
+
 
 type
   HiddenAgendaError* = object of CatchableError

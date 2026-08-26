@@ -8,8 +8,9 @@
 ## is what makes the design's "roles seeded" true of the BYTES, not just of the
 ## prose (`tests/test_noleak.nim` gate (d)).
 
-import std/[strutils, unicode]
 import sim_types, station, sim_config, events
+
+export sim_types.cleanText, sim_types.oneLine
 
 type
   Rng* = object
@@ -87,21 +88,6 @@ proc rand*(rng: var Rng, bound: int): int =
   int(rng.next() mod uint64(bound))
 
 # ---------------------------------------------------------------------------
-# Rune-safe text. NEVER slice a recorded string by byte index: a byte cut puts
-# invalid UTF-8 in the replay and only a strict parser finds it (bullwhip,
-# 2026-08-22).
-# ---------------------------------------------------------------------------
-
-proc cleanText*(text: string, limit: int): string =
-  result = text.strip()
-  if result.runeLen <= limit:
-    return
-  result = result.runeSubStr(0, limit - 1) & "\u2026"
-
-proc oneLine*(text: string, limit: int): string =
-  cleanText(text.replace("\n", " ").replace("\r", " "), limit)
-
-# ---------------------------------------------------------------------------
 # Setup
 # ---------------------------------------------------------------------------
 
@@ -138,9 +124,13 @@ proc initSim*(config: GameConfig): Sim =
     for other in 0 ..< Seats:
       cog.lastSeen[other] = Seen(t: -1, valid: false)
     result.cogs[slot] = cog
+    ## A policy name is platform-supplied and reaches the replay's
+    ## `policyNames[]`, `results.names[]`, the `reveal` row's `policy` field
+    ## and the viewer's roster chips, so it is cut on RUNE boundaries at
+    ## `MaxPolicyLen` like every other string that gets recorded.
     result.policyNames[slot] =
       if slot < config.players.len and config.players[slot].name.len > 0:
-        config.players[slot].name
+        cleanText(config.players[slot].name, MaxPolicyLen)
       else:
         Aliases[slot]
   ## Every seam stands full at tick 0 (the design's 18 gems), but they do NOT
