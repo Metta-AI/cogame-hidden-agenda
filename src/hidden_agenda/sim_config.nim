@@ -64,6 +64,15 @@ proc defaultGameConfig*(): GameConfig =
     freezeRange: 2,
     freezeCooldownTicks: 260,
     visionRadius: 8,
+    # The design note's repair ladder names step (e) as awarenessRadius
+    # 2 -> 3. Three is not enough: measured on tests/test_feasibility.nim,
+    # awarenessRadius = 3 FAILS gate (c) (impostor win rate 0.38 against a
+    # 0.35 ceiling, mean witnessed freezes 1.81) and FAILS gate (e)
+    # (7/29 witnessed freezes convicted = 0.24 against a 0.60 floor). Four
+    # passes both with margin (c: 1.62 witnessed, impostor win rate 0.00;
+    # e: 16/26 = 0.62), so the ladder's own step was walked one rung further
+    # in the same direction rather than reaching for a pinned constant. The
+    # gate test is the enforcement; this line is only its record.
     awarenessRadius: 4,
     sweepTicks: 8,
     meetingCadenceTicks: 200,
