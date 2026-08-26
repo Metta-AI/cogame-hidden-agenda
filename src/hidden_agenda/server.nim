@@ -10,7 +10,14 @@
 ##   GET /client/player?slot=&token=  the seat's HTML shell; it NEVER opens the
 ##                                    player socket
 ##   GET /client/global               the broadcast client
-##   GET /client/replay               the broadcast replay page
+##
+## There is deliberately NO pod route serving a replay page. A finished episode
+## is watched through the STATIC wasm bundle the platform builds from
+## tools/build_replay_viewer.sh (coworld_manifest_template.json declares
+## "replay_viewer": {"bundle": "static-replay-viewer"}), which contacts nothing
+## but S3. A pod-served replay page would keep a game container alive just to
+## watch a finished episode, and tests/test_manifest.nim asserts the path is
+## absent from src/, docs/, client/, the README and the manifest.
 ##   WS  /player?slot=N&token=T       the seat socket; a bad token is refused
 ##                                    with a close, never a hang
 ##   WS  /global                      live spectator: the packet + chrome frame
@@ -31,7 +38,6 @@ import sim_types, sim_config, sim_state, sim, scripted, llm,
 const
   PlayerPage = staticRead("../../client/player.html")
   GlobalPage = staticRead("../../client/global.html")
-  ReplayPage = staticRead("../../client/replay_broadcast.html")
   ChromeCommonJs = staticRead("../../client/chrome_common.js")
   BroadcastCoreJs = staticRead("../../client/broadcast_core.js")
   ChromeCommonMarker = "<!-- CHROME_COMMON -->"
@@ -284,10 +290,6 @@ proc globalPageHandler(request: Request) {.gcsafe.} =
   {.gcsafe.}:
     respondHtml(request, splicePage(GlobalPage))
 
-proc replayPageHandler(request: Request) {.gcsafe.} =
-  {.gcsafe.}:
-    respondHtml(request, splicePage(ReplayPage))
-
 proc clientAssetHandler(request: Request) {.gcsafe.} =
   {.gcsafe.}:
     let name = request.pathParams["name"]
@@ -405,11 +407,11 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
 
 proc buildRouter(): Router =
   ## The two /client pages are registered BEFORE the asset route, so neither
-  ## is shadowed by it.
+  ## is shadowed by it. There is no replay page route: the replay viewer is
+  ## the static bundle, never a pod path.
   result.get("/healthz", healthzHandler)
   result.get("/client/player", playerPageHandler)
   result.get("/client/global", globalPageHandler)
-  result.get("/client/replay", replayPageHandler)
   result.get("/client/@name", clientAssetHandler)
   result.get("/global", globalUpgradeHandler)
   result.get("/player", playerUpgradeHandler)

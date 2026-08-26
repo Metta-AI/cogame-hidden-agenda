@@ -93,6 +93,23 @@ block everyDeclaredPlayerIsSeated:
 block replayViewerIsAStaticBundle:
   check(game{"replay_viewer"}{"bundle"}.getStr() == "static-replay-viewer",
     "the replay viewer is the STATIC bundle, never a pod")
+
+  ## ...and there is no pod path serving a replay page ANYWHERE: not a route,
+  ## not a handler, not a sentence in a doc, not a line of the manifest the
+  ## platform renders. The static bundle is the only replay surface.
+  var offenders: seq[string]
+  for dir in ["src", "docs", "client"]:
+    for path in walkDirRec(RepoRoot / dir):
+      if path.endsWith(".nim") or path.endsWith(".md") or
+          path.endsWith(".html"):
+        if "/client/replay" in readFile(path):
+          offenders.add(path.relativePath(RepoRoot))
+  for path in ["README.md", "coworld_manifest_template.json"]:
+    if "/client/replay" in readFile(RepoRoot / path):
+      offenders.add(path)
+  check(offenders.len == 0,
+    "no /client/replay pod path anywhere, found it in: " &
+      offenders.join(", "))
   check(game{"runnable"}{"type"}.getStr() == "game",
     "game.runnable.type must be \"game\" (coworld 0.1.42)")
   check(game{"owner"}.getStr().len > 0, "game.owner is required")

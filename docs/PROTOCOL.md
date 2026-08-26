@@ -44,9 +44,14 @@ slot-registration race). Any other frame is ignored with a log line.
 | `GET /healthz` | `200 ok`, from process start until `shutdownGraceSeconds` after the artifacts are written |
 | `GET /client/player?slot=N&token=T` | the seat's HTML shell; it **never** opens the player socket |
 | `GET /client/global` | the live spectator client |
-| `GET /client/replay` | the broadcast replay page |
 | `WS /player?slot=N&token=T` | the seat socket; a bad token is refused with a close, never a hang |
 | `WS /global` | live spectator: the board packet + the chrome frame |
+
+**No route serves a replay page.** A finished episode is watched through the
+**static replay bundle** (`coworld_manifest_template.json` declares
+`"replay_viewer": {"bundle": "static-replay-viewer"}`), which is built by
+`tools/build_replay_viewer.sh`, served straight off the platform's CDN and
+contacts nothing but S3 for the `.replay` file. No pod path serves a replay page.
 
 Startup randomises the seed **before** `config.update`, waits up to
 `playerConnectTimeoutSeconds = 120` for the five sockets, starts anyway with
