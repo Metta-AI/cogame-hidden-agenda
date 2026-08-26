@@ -211,4 +211,44 @@ block aFailedReplyCastsSkip:
   check(eventsOfKind(sim, "eject")[0]{"outcome"}.getStr() == "skip",
     "five skips eject nobody")
 
+block theImpostorBandwagonsOnThePreviousMeeting:
+  ## The `miner` impostor's vote is "the active cog, other than itself, with
+  ## the most votes in the PREVIOUS meeting", and its switch names the
+  ## second-most. `openMeeting` appends the CURRENT meeting's record with five
+  ## empty votes before the decision point runs, so a reader of
+  ## `sim.meetings[^1]` finds an empty table forever and the bandwagon never
+  ## fires (it fell through to the stale-cog fallback with switch "skip").
+  var sim = rig("hidden-agenda-notalk")
+
+  ## Meeting 1: RED and GREEN draw votes, BLUE draws one.
+  sim.openMeetingForTest(mcCadence)
+  let votes1 = ["BLUE", "RED", "RED", "GREEN", "GREEN"]
+  for slot in 0 ..< Seats:
+    var decision = Decision(plan: @[PlanStep(job: jkHold)], vote: votes1[slot])
+    sim.applyDecision(slot, decision, true)
+  for offset in 1 .. sim.config.meetingTicks:
+    sim.tick = sim.meetingOpenTick + offset
+    sim.meetingTickForTest()
+  sim.closeMeetingForTest()
+  check(sim.meetings.len == 1 and sim.meetings[0].outcome.len > 0,
+    "meeting 1 must have resolved")
+
+  ## Meeting 2 opens; the impostor decides at its opening decision point, with
+  ## the current meeting's record already appended and empty.
+  sim.tick = sim.meetingOpenTick + sim.config.meetingTicks + 1
+  sim.openMeetingForTest(mcCadence)
+  check(sim.meetings.len == 2 and sim.meetings[1].votes[0].len == 0,
+    "the current meeting's record is appended before the decision point " &
+    "and is empty")
+  let decision = scriptedDecision(sim, sim.impostorSlot, skMiner, true)
+  check(decision.vote in ["RED", "GREEN"],
+    "the impostor bandwagons onto a leader of the PREVIOUS meeting, got '" &
+    decision.vote & "'")
+  check(decision.switchTo in ["RED", "GREEN"] and
+        decision.switchTo != decision.vote,
+    "and its switch names the runner-up, not the 'skip' the dead path " &
+    "always produced, got '" & decision.switchTo & "'")
+  check(decision.switchIf == Aliases[sim.impostorSlot],
+    "the switch is conditional on a vote landing on itself")
+
 echo "test_meeting: ok"

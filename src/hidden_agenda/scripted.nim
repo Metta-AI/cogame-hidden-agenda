@@ -93,10 +93,21 @@ proc anyCogInView(sim: Sim, cog: Cog): bool =
   false
 
 proc lastMeetingCounts(sim: Sim): Table[string, int] =
+  ## Votes cast in the PREVIOUS meeting — the last one that actually resolved.
+  ##
+  ## `openMeeting` appends the current meeting's record with five empty votes
+  ## and `runDecisionPoint` runs immediately afterwards, so `sim.meetings[^1]`
+  ## at a decision point is the meeting being voted on right now and is always
+  ## empty. Reading it made the impostor's bandwagon vote dead code. Walk back
+  ## to the newest record that carries an `outcome`, which is exactly the
+  ## previous meeting whether the caller is inside a meeting or not.
   result = initTable[string, int]()
-  if sim.meetings.len == 0:
+  var index = sim.meetings.high
+  while index >= 0 and sim.meetings[index].outcome.len == 0:
+    index.dec
+  if index < 0:
     return
-  for vote in sim.meetings[^1].votes:
+  for vote in sim.meetings[index].votes:
     if vote.len == 0 or vote == "skip":
       continue
     result[vote] = result.getOrDefault(vote) + 1
