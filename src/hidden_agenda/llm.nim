@@ -35,8 +35,17 @@ type
   LlmTransport = enum
     ltNone, ltBedrock, ltAnthropic
 
+  BatchSender* = proc (batch: RequestBatch, timeoutSeconds: int):
+    ResponseBatch {.closure.}
+    ## The seam the tests stub. `nil` in production, where the batch goes to
+    ## `client.curl.makeRequests`; a test installs one to drive a transport
+    ## error, a 429, a 403 or a junk body through `decideAll` without a
+    ## socket. There is no other way to reach the retry batch: a client with
+    ## no credentials short-circuits to the scripted fallback before the loop.
+
   LlmClient* = ref object
     curl: Curly
+    sendBatch*: BatchSender
     transport: LlmTransport
     apiKey: string
     bedrockEndpoint: string
@@ -54,6 +63,14 @@ proc disabledLlmClient*(): LlmClient =
   ## construct it directly so no network is ever touched.
   LlmClient(transport: ltNone, disabled: true, maxOutputTokens: 900,
     timeoutSeconds: 14)
+
+proc stubbedLlmClient*(send: BatchSender): LlmClient =
+  ## A client whose batch transport is `send`. Nothing here opens a socket and
+  ## `curl` is never touched, which is what lets tests/test_llm.nim drive
+  ## `decideAll`'s retry batch, its 429 / 403 / junk-reply handling and its
+  ## fallback recording. Production never calls this.
+  LlmClient(transport: ltAnthropic, disabled: false, apiKey: "stub",
+    model: "stub", maxOutputTokens: 900, timeoutSeconds: 14, sendBatch: send)
 
 proc resolveApiKey(): string =
   result = getEnv("ANTHROPIC_API_KEY").strip()
@@ -704,7 +721,11 @@ proc decideAll*(
       batch.post(request.url, request.headers, request.body, $index)
     ## ONE parallel batch for every open seat. Never a loop of single calls.
     let started = epochTime()
-    let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
+    let responses =
+      if client.sendBatch != nil:
+        client.sendBatch(batch, client.timeoutSeconds)
+      else:
+        client.curl.makeRequests(batch, client.timeoutSeconds)
     let latency = int((epochTime() - started) * 1000.0)
     var stillOpen: seq[int]
     for position, index in open:

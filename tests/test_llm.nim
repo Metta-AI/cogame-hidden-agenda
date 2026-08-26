@@ -5,6 +5,7 @@
 ## the batch cap and the play deadline.
 
 import std/[json, strutils, unicode]
+import curly
 import support/helpers
 import hidden_agenda/[sim_types, station, sim_config, sim_state, sim, llm]
 
@@ -227,5 +228,160 @@ block theDeadlineSettlesEarly:
   check(sim.ending == "deadline", "with the deadline ending")
   for score in sim.scores:
     check(score == 0, "and all scores 0")
+
+block theRetryBatchAndTheFallbackAreDriven:
+  ## Every driver block above constructs a client with no credentials, which
+  ## short-circuits to the scripted fallback BEFORE the batch loop -- so
+  ## nothing exercised the retry batch, dsRetry was never produced anywhere,
+  ## and the transport ladder (timeout, 429, 403, junk) was untested.
+  ## `stubbedLlmClient` installs a batch sender in place of curl.
+
+  proc reply(text: string): Response =
+    Response(code: 200, body: $(%*{
+      "stop_reason": "end_turn",
+      "content": [{"type": "text", "text": text}]
+    }))
+
+  let good = """{"plan":[{"job":"guard"}],"vote":"skip"}"""
+
+  ## (1) A transport error on the first batch, a good reply on the second:
+  ## the seat is retried ONCE, inside the same decision point, and the
+  ## decision is recorded as "retry" so phase 60 can count it.
+  block:
+    var sim = rig()
+    var batches = 0
+    var sawHint = false
+    proc send(batch: RequestBatch, timeoutSeconds: int):
+        ResponseBatch {.closure.} =
+      batches.inc
+      for i in 0 ..< batch.len:
+        if "Your previous reply was invalid" in batch[i].body:
+          sawHint = true
+        if batches == 1:
+          result.add((Response(), "connection timed out"))
+        else:
+          result.add((reply(good), ""))
+    let client = stubbedLlmClient(send)
+    var prompts: seq[string]
+    var kinds: seq[ScriptKind]
+    for _ in 0 ..< Seats:
+      prompts.add("play well")
+      kinds.add(skNone)
+    let seats = sim.activeSeats()
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    check(batches == 2, "a first-attempt failure issues exactly ONE more " &
+      "batch, got " & $batches)
+    check(sawHint, "and the retry batch carries the retry hint")
+    check(decisions.len == seats.len, "one decision per seat")
+    for decision in decisions:
+      check(decision.source == dsRetry,
+        "a decision won on the second attempt is recorded as retry, got " &
+        $decision.source)
+      check(decision.plan.len >= 1, "and is a legal plan")
+
+  ## (2) A 429 on both attempts: two batches, then the scripted fallback,
+  ## recorded as such. decideAll never raises.
+  block:
+    var sim = rig()
+    var batches = 0
+    proc send(batch: RequestBatch, timeoutSeconds: int):
+        ResponseBatch {.closure.} =
+      batches.inc
+      for i in 0 ..< batch.len:
+        result.add((Response(code: 429, body: "slow down"), ""))
+    let client = stubbedLlmClient(send)
+    var prompts: seq[string]
+    var kinds: seq[ScriptKind]
+    for _ in 0 ..< Seats:
+      prompts.add("play well")
+      kinds.add(skNone)
+    let seats = sim.activeSeats()
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    check(batches == 2, "a 429 is retried once and then given up on, got " &
+      $batches & " batches")
+    for decision in decisions:
+      check(decision.source == dsFallback,
+        "and the fallback is RECORDED, got " & $decision.source)
+      check(decision.plan.len >= 1, "and is a legal plan")
+
+  ## (3) A 403 disables the client outright: one batch, every seat falls back,
+  ## and every LATER decision point goes straight to the fallback.
+  block:
+    var sim = rig()
+    var batches = 0
+    proc send(batch: RequestBatch, timeoutSeconds: int):
+        ResponseBatch {.closure.} =
+      batches.inc
+      for i in 0 ..< batch.len:
+        result.add((Response(code: 403, body: "no"), ""))
+    let client = stubbedLlmClient(send)
+    var prompts: seq[string]
+    var kinds: seq[ScriptKind]
+    for _ in 0 ..< Seats:
+      prompts.add("play well")
+      kinds.add(skNone)
+    let seats = sim.activeSeats()
+    var decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    check(batches == 1, "a 403 stops the ladder inside the first batch")
+    check(client.disabled, "and disables the client")
+    for decision in decisions:
+      check(decision.source == dsFallback, "every seat falls back")
+    decisions = client.decideAll(sim, seats, prompts, kinds, "meeting")
+    check(batches == 1, "a disabled client never issues another batch")
+    for decision in decisions:
+      check(decision.source == dsFallback, "and every later seat is scripted")
+
+  ## (4) Junk that is not JSON at all, twice: two batches, then the fallback.
+  block:
+    var sim = rig()
+    var batches = 0
+    proc send(batch: RequestBatch, timeoutSeconds: int):
+        ResponseBatch {.closure.} =
+      batches.inc
+      for i in 0 ..< batch.len:
+        result.add((reply("I would rather not say."), ""))
+    let client = stubbedLlmClient(send)
+    var prompts: seq[string]
+    var kinds: seq[ScriptKind]
+    for _ in 0 ..< Seats:
+      prompts.add("play well")
+      kinds.add(skNone)
+    let seats = sim.activeSeats()
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    check(batches == 2, "junk is retried once")
+    for decision in decisions:
+      check(decision.source == dsFallback,
+        "and then falls back, got " & $decision.source)
+      check(decision.plan.len >= 1, "with a legal plan")
+
+  ## (5) A seat that answers on the first attempt is NOT in the retry batch:
+  ## only the seats that failed are retried.
+  block:
+    var sim = rig()
+    var sizes: seq[int]
+    proc send(batch: RequestBatch, timeoutSeconds: int):
+        ResponseBatch {.closure.} =
+      sizes.add(batch.len)
+      for i in 0 ..< batch.len:
+        ## Tag is the index into `seats`; seat 0 answers immediately.
+        if batch[i].tag == "0" or sizes.len > 1:
+          result.add((reply(good), ""))
+        else:
+          result.add((Response(), "connection reset"))
+    let client = stubbedLlmClient(send)
+    var prompts: seq[string]
+    var kinds: seq[ScriptKind]
+    for _ in 0 ..< Seats:
+      prompts.add("play well")
+      kinds.add(skNone)
+    let seats = sim.activeSeats()
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    check(sizes == @[Seats, Seats - 1],
+      "the retry batch carries only the seats that failed, got " & $sizes)
+    check(decisions[0].source == dsLlm,
+      "the seat that answered first time is recorded as llm")
+    for index in 1 ..< decisions.len:
+      check(decisions[index].source == dsRetry,
+        "and the rest as retry")
 
 echo "test_llm: ok"
