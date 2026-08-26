@@ -313,8 +313,9 @@ jobs:
           # count is still reported on stdout and in viewer-smoke.json.
           # --soak 10: a viewer that loads and then freezes mid-replay passes
           # every scrub readout (seeking skips the killing frame). The cert
-          # fixture is 900 ticks = 37.5 s of video at 24 fps, so it comfortably
-          # outlasts the soak window (ecos, 2026-08-23).
+          # fixture plays 608 ticks = 25.3 s of video at 24 fps, so it outlasts
+          # the soak window better than twice over (ecos, 2026-08-23);
+          # tests/test_manifest.nim plays the fixture and holds that floor.
           node tools/ci/viewer_smoke.mjs \
             --bundle dist/static-replay-viewer \
             --replay "${replay}" \
@@ -350,9 +351,16 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: viewer-smoke
+          # BOTH smoke steps: the bundle step writes to the repo root, the
+          # renderer fixture step writes to dist/fixture (--out). Collecting
+          # only the root left the fixture's screenshot and its canvas_text
+          # JSON -- the ONLY measurement in this job that covers any drawn
+          # text at all -- in the job log and nowhere else.
           path: |
             viewer-smoke.png
             viewer-smoke.json
+            dist/fixture/viewer-smoke.png
+            dist/fixture/viewer-smoke.json
           if-no-files-found: warn
           retention-days: 14
 
