@@ -1,0 +1,33 @@
+[
+  {
+    "name": "hidden-agenda-sleuth",
+    "run": "/bin/hidden-agenda-player",
+    "env": {
+      "PLAYER_PROMPT": "Whichever role you draw, this game is won by controlling who can see what. AS CREW: your job is deposits first and evidence second - 32 deposits wins outright, so never spend more than one plan in a row on `watch` or `guard`. Work the galleries (S2, S5) while they hold gems and take a vault seam only when someone else is heading the same way; a crewmate alone in a vault is a free freeze. Every meeting, reason from three things in this order: (1) anything in YOU SAW - a witnessed freeze is proof, vote it and never switch off it; (2) who was NOT seen by anyone for a long stretch that ends with a body appearing - cross the last-seen table against where the body lies; (3) who was at the grate when the counter did not move. If you have nothing, vote `skip` rather than lynching a random crewmate: a wrong ejection is a free kill for the impostor. Set `switch` to {\"if\":\"<you>\",\"to\":\"<your best suspect>\"} so a bandwagon on you does not end your game unanswered. AS IMPOSTOR: be patient and be boring. Mine and deposit like everyone else, even though your gems vanish - but never fake a deposit while anything is in view. Use `lurk` in a vault whose seam still has gems and let a crewmate walk to you; `hunt` only when your own view is empty, and remember your view is a cone: check that nobody was walking behind you two seconds ago. You need three removals and one of them can come from the vote - spend your meetings building a plausible, specific story about someone else's gaps, and vote with the majority, never first.",
+      "USE_BEDROCK": "true"
+    }
+  },
+  {
+    "name": "hidden-agenda-shadow",
+    "run": "/bin/hidden-agenda-player",
+    "env": {
+      "PLAYER_PROMPT": "Play the clock. AS CREW: count it out - a gallery trip is about 170 ticks for two deposits and there are only four of you, so the crew wins near tick 1000 if nobody wastes a plan. Chain `mine` then `deposit` in every plan and put a third step on `watch` only when you are already walking past that cog. Pair up: name the cog you can see in your `watch` step, because two crew in one room cannot be frozen quietly and you both get an alibi worth citing. At meetings, trust `togetherTicks` above accusation: the cog you have personally been beside for hundreds of ticks is almost certainly clean, so say so and spend your vote on the one nobody can account for. Do not switch your vote unless the tally is about to land on someone you know is clean. AS IMPOSTOR: kill the tempo, not the crew. Freeze the cog that is closest to the grate with a full hand - you delete two deposits and 150 ticks of work with one shot. Then walk somewhere public and be seen. Between freezes, use `guard` at the grate: it sweeps, it looks industrious, and it puts you where you can watch who leaves alone. If you are ever accused with real evidence, do not argue with the tally - set `switch` to move your vote onto the second-place suspect and hope for a tie, because a tie ejects nobody.",
+      "USE_BEDROCK": "true"
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "hidden-agenda-miner",
+    "run": "/bin/hidden-agenda-player",
+    "env": {
+      "PLAYER_SCRIPTED": "miner"
+    }
+  },
+  {
+    "name": "hidden-agenda-lurker",
+    "run": "/bin/hidden-agenda-player",
+    "env": {
+      "PLAYER_SCRIPTED": "lurker"
+    }
+  }
+]

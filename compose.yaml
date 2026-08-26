@@ -1,0 +1,20 @@
+# ONE service, ONE image: /bin/hidden-agenda (the game) and
+# /bin/hidden-agenda-player (the thin prompt-carrying seat) come out of the same
+# build, which is what keeps a champion and a scripted filler byte-identical
+# apart from their environment.
+#
+# The service name is the single source of the manifest image placeholder:
+# `services.hidden_agenda` -> {{HIDDEN_AGENDA_IMAGE}} (lantern, 2026-08-23 --
+# `coworld build` hard-fails anything else). It is UNDERSCORED on purpose:
+# game.name must equal the coworld secret namespace exactly
+# (cooperative-hunting, 2026-08-25), so game.name = "hidden_agenda" and the
+# secret URI is secret://coworld/hidden_agenda/anthropic_api_key. The repo,
+# image and page slug stay hyphenated.
+services:
+  hidden_agenda:
+    image: coworld-hidden-agenda:latest
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host

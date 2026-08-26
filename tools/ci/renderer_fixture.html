@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Agenda &mdash; worst-case renderer fixture</title>
+<!--
+  WHY THIS FILE EXISTS
+  --------------------
+  tools/ci/docker_smoke.sh runs with no ANTHROPIC_API_KEY, so every seat plays
+  the scripted baseline and a scripted baseline emits no `say` and no `notes`.
+  EVERY replay CI produces therefore carries ZERO LLM text, and nothing that
+  plays a replay can exercise the chrome that draws it (cogchemists,
+  2026-08-24).
+
+  This fixture loads the REAL renderer (client/broadcast_core.js) and the REAL
+  shared chrome (client/chrome_common.js) and drives them against a synthetic
+  worst case:
+
+    * a full-cap 90-character `say`, 80-character `hunch` and 240-character
+      `notes` on ALL FIVE seats;
+    * the vote board at five rows with the longest aliases;
+    * the CAUGHT! banner at full length;
+    * cogs parked in every corner of the board, so an alias label anchored with
+      no room shows up as a string drawn outside the canvas;
+    * several canvas sizes, including the 360 px featured-match iframe.
+
+  It sets data-replay-loaded="true" on <html> once it has drawn every size, and
+  data-replay-error="<message>" if any of its own self-checks fail, so
+  tools/ci/viewer_smoke.mjs --strict-text-bounds reads it exactly like the real
+  bundle.
+-->
+<style>
+  html, body { margin: 0; background: #16110d; color: #f2e8d8;
+    font: 12px/1.4 'Courier New', monospace; }
+  #sizes { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+  .slot { border: 1px solid rgba(242,232,216,0.2); }
+  #dom { padding: 8px; max-width: 1100px; }
+  .feed-row, .banner-chip, .vrow {
+    padding: 3px 6px; margin: 2px 0;
+    background: rgba(20,14,9,0.7);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .banner-chip.caught { color: #e0523a; }
+  #report { padding: 8px; color: #b8ac98; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="sizes"></div>
+<div id="dom"></div>
+<div id="report">building&hellip;</div>
+<script src="./chrome_common.js"></script>
+<script src="./broadcast_core.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var MAX_SAY = 90, MAX_HUNCH = 80, MAX_NOTES = 240;
+  var ALIASES = ['RED', 'BLUE', 'GREEN', 'YELLOW', 'PINK'];
+  var COLOURS = ['red', 'blue', 'green', 'yellow', 'pink'];
+  var POLICIES = ['hidden-agenda-sleuth', 'hidden-agenda-shadow',
+    'hidden-agenda-miner', 'hidden-agenda-miner', 'hidden-agenda-lurker'];
+
+  function fail(message) {
+    document.documentElement.setAttribute('data-replay-error', message);
+    document.getElementById('report').textContent = 'FAIL: ' + message;
+    throw new Error(message);
+  }
+
+  function repeatTo(seed, n) {
+    var out = '';
+    while (out.length < n) out += seed;
+    return out.slice(0, n);
+  }
+
+  var SAY = repeatTo('pink was standing over green in the south gallery and ',
+    MAX_SAY);
+  var HUNCH = repeatTo('pink froze green at 806 and i saw the whole thing ',
+    MAX_HUNCH);
+  var NOTES = repeatTo('red has been in the northwest vault since tick 640, ' +
+    'yellow audits the grate, blue is clean by togetherTicks, ', MAX_NOTES);
+  if (SAY.length !== MAX_SAY) fail('say is ' + SAY.length + ' not ' + MAX_SAY);
+  if (HUNCH.length !== MAX_HUNCH) {
+    fail('hunch is ' + HUNCH.length + ' not ' + MAX_HUNCH);
+  }
+  if (NOTES.length !== MAX_NOTES) {
+    fail('notes is ' + NOTES.length + ' not ' + MAX_NOTES);
+  }
+
+  // ---- the synthetic packet ------------------------------------------------
+  var GRID = [
+    '###########################',
+    '#.......##.......##.......#',
+    '#.S.....##...S...##.....S.#',
+    '#....#..##.#...#.##..#....#',
+    '#.......##.......##.......#',
+    '#.......#####.#####.......#',
+    '####.########.########.####',
+    '####.####.........####.####',
+    '####.####.#.GGG.#.####.####',
+    '####........GGG........####',
+    '####.####.#.GGG.#.####.####',
+    '####.####.........####.####',
+    '####.########.########.####',
+    '#.......#####.#####.......#',
+    '#.......##.......##.......#',
+    '#....#..##.#...#.##..#....#',
+    '#.S.....##...S...##.....S.#',
+    '#.......##.......##.......#',
+    '###########################'
+  ];
+  var ROOMS = [
+    { id: 'NW', x0: 1, x1: 7, y0: 1, y1: 5, door: [4, 6] },
+    { id: 'N', x0: 10, x1: 16, y0: 1, y1: 4, door: [13, 5] },
+    { id: 'NE', x0: 19, x1: 25, y0: 1, y1: 5, door: [22, 6] },
+    { id: 'SW', x0: 1, x1: 7, y0: 13, y1: 17, door: [4, 12] },
+    { id: 'S', x0: 10, x1: 16, y0: 14, y1: 17, door: [13, 13] },
+    { id: 'SE', x0: 19, x1: 25, y0: 13, y1: 17, door: [22, 12] },
+    { id: 'HUB', x0: 9, x1: 17, y0: 7, y1: 11, door: [13, 9] }
+  ];
+  var SEAMS = [
+    { id: 'S1', room: 'NW', cell: [2, 2] }, { id: 'S2', room: 'N', cell: [13, 2] },
+    { id: 'S3', room: 'NE', cell: [24, 2] }, { id: 'S4', room: 'SW', cell: [2, 16] },
+    { id: 'S5', room: 'S', cell: [13, 16] }, { id: 'S6', room: 'SE', cell: [24, 16] }
+  ];
+  var GRATE = [];
+  for (var gy = 8; gy <= 10; gy++) {
+    for (var gx = 12; gx <= 14; gx++) GRATE.push([gx, gy]);
+  }
+
+  var META = {
+    aliases: ALIASES, policyNames: POLICIES,
+    roles: ['crew', 'crew', 'crew', 'crew', 'impostor'],
+    colors: COLOURS, cell: 40, boardW: 1080, boardH: 760,
+    config: {
+      cols: 27, rows: 19, cell: 40, grid: GRID, rooms: ROOMS, seams: SEAMS,
+      grate: GRATE, visionRadius: 8, mineTicks: 72, maxTicks: 3000,
+      depositTarget: 32, freezeCooldownTicks: 220
+    }
+  };
+
+  // Cogs parked in every CORNER of the board: an alias label anchored with no
+  // room shows up as a string drawn outside the canvas.
+  var CORNERS = [[1, 1], [25, 1], [1, 17], [25, 17], [13, 9]];
+  var STATES = [0, 1, 2, 3, 0];
+  var c = [];
+  for (var i = 0; i < 5; i++) {
+    c.push(CORNERS[i][0], CORNERS[i][1], i % 4, STATES[i], i % 3, 40);
+  }
+
+  var HUD = {
+    t: 812, st: 0, mx: 3000, mt: 3000, ph: 'playing', en: true, pl: true,
+    sp: 1, lp: false, sk: false, ff: false, pov: -1, lob: 0,
+    teams: { crew: { lives: 21, policies: [] },
+             impostor: { lives: 3, policies: [] } },
+    roster: ALIASES.map(function (name, s) {
+      return { s: s, name: name, pol: POLICIES[s],
+        team: s === 4 ? 'impostor' : 'crew', alive: s !== 2, lives: 0 };
+    }),
+    events: [
+      { k: 'freeze', t: 806, seat: 4, victim: 'GREEN', cell: [13, 16],
+        witnesses: ['RED', 'BLUE'] },
+      { k: 'witness', t: 806, witness: 'RED', freezer: 'PINK',
+        victim: 'GREEN', cell: [13, 16], sawFreezer: true, sawVictim: true }
+    ],
+    agenda: {
+      dep: 21, tgt: 32, crew: 3, imp: 4, cool: 180,
+      gems: [3, 1, 2, 0, 3, 2],
+      states: ['active', 'active', 'frozen', 'active', 'active'],
+      m: { n: 4, cause: 'witness', phase: 3,
+        votes: { RED: 'PINK', BLUE: 'PINK', YELLOW: 'skip', PINK: 'YELLOW' },
+        tally: { PINK: 2, YELLOW: 1 }, 'in': 5 },
+      roles: ['crew', 'crew', 'crew', 'crew', 'impostor'],
+      wedges: [{ s: 4, f: 2, r: 8, k: 'imp' }]
+    }
+  };
+
+  var PACKET = JSON.stringify({
+    meta: META,
+    b: { t: 812, c: c, v: [2, 1, 0, 8, 4], g: [3, 1, 2, 0, 3, 2], d: 21,
+         ph: 3 },
+    hud: HUD
+  });
+
+  // ---- board draws at several sizes, including 360 px ---------------------
+  var SIZES = [[360, 253], [620, 436], [960, 676], [1080, 760]];
+  var host = document.getElementById('sizes');
+  var drawn = 0;
+  SIZES.forEach(function (size) {
+    var canvas = document.createElement('canvas');
+    canvas.className = 'slot';
+    canvas.style.width = size[0] + 'px';
+    canvas.style.height = size[1] + 'px';
+    host.appendChild(canvas);
+    var core = window.BroadcastCore.create({
+      canvas: canvas,
+      viewportWidth: size[0],
+      viewportHeight: size[1],
+      devicePixelRatio: 1,
+      onText: function () {},
+      onStatus: function () {}
+    });
+    core.start();
+    core.ingest(PACKET);
+    // Two more frames so the freeze FX and the witness wedge both draw.
+    core.ingest(PACKET);
+    core.ingest(PACKET);
+    drawn += 1;
+  });
+
+  // ---- the DOM chrome at full cap ----------------------------------------
+  var dom = document.getElementById('dom');
+  var html = '';
+  html += '<div class="banner-chip caught">CAUGHT! PINK FROZE GREEN ' +
+    '\u2014 RED + BLUE SAW IT</div>';
+  ALIASES.forEach(function (alias) {
+    html += '<div class="feed-row">' + alias + ' &ldquo;' + SAY +
+      '&rdquo;</div>';
+    html += '<div class="feed-row">' + alias +
+      ' &rarr; mine S5, deposit, watch PINK &ldquo;' + HUNCH +
+      '&rdquo;</div>';
+    html += '<div class="feed-row">' + alias + ' notes: ' + NOTES + '</div>';
+  });
+  ALIASES.forEach(function (alias) {
+    html += '<div class="vrow">' + alias + ' \u2192 YELLOW</div>';
+  });
+  dom.innerHTML = html;
+
+  var overflowing = 0;
+  var rows = dom.querySelectorAll('.feed-row, .banner-chip, .vrow');
+  for (var r = 0; r < rows.length; r++) {
+    if (rows[r].scrollWidth > rows[r].clientWidth + 1) overflowing += 1;
+  }
+
+  if (!window.ChromeCommon) fail('chrome_common.js did not load');
+  if (drawn !== SIZES.length) {
+    fail('only ' + drawn + ' of ' + SIZES.length + ' sizes drew');
+  }
+
+  document.getElementById('report').textContent =
+    'sizes drawn: ' + drawn +
+    '\nsay/hunch/notes: ' + SAY.length + '/' + HUNCH.length + '/' +
+    NOTES.length +
+    '\nDOM rows: ' + rows.length + ' (' + overflowing + ' ellipsised)';
+  document.documentElement.setAttribute('data-replay-loaded', 'true');
+})();
+</script>
+</body>
+</html>

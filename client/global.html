@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Agenda &mdash; Spectator</title>
+<style>
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #16110d; color: #f2e8d8;
+    font: 13px/1.4 'Courier New', monospace;
+  }
+  #wrap { position: absolute; inset: 0; display: flex; flex-direction: column; }
+  #head {
+    padding: 8px 14px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: #e8a33d; border-bottom: 1px solid rgba(242, 232, 216, 0.12);
+  }
+  #board { flex: 1 1 auto; width: 100%; display: block; }
+  #line { padding: 6px 14px; color: #b8ac98; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="head">Hidden Agenda &mdash; live</div>
+  <canvas id="board"></canvas>
+  <div id="line">connecting</div>
+</div>
+<!-- WIRE_CONSTANTS -->
+<!-- CHROME_COMMON -->
+<!-- BROADCAST_CORE -->
+<script>
+(function () {
+  'use strict';
+  var canvas = document.getElementById('board');
+  var line = document.getElementById('line');
+  var core = window.BroadcastCore.create({
+    canvas: canvas,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight - 60,
+    devicePixelRatio: window.devicePixelRatio || 1,
+    onText: function (txt) {
+      var s;
+      try { s = JSON.parse(txt); } catch (e) { return; }
+      var a = s.agenda || {};
+      line.textContent = 'TICK ' + s.t + '  DEPOSITS ' + (a.dep || 0) + '/' +
+        (a.tgt || 32) + '  CREW LEFT ' + (a.crew || 0) +
+        (s.over ? '  FINAL: ' + s.over.ending : '');
+    },
+    onStatus: function (st) { if (st !== 'open') line.textContent = st; }
+  });
+  core.start();
+  function fit() {
+    core.setViewportSize(window.innerWidth, window.innerHeight - 60,
+      window.devicePixelRatio || 1);
+  }
+  window.addEventListener('resize', fit);
+  fit();
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var socket = new WebSocket(proto + '//' + location.host + '/global');
+  socket.binaryType = 'arraybuffer';
+  socket.onmessage = function (ev) {
+    core.ingest(typeof ev.data === 'string' ? ev.data
+      : new Uint8Array(ev.data));
+  };
+  socket.onclose = function () { line.textContent = 'disconnected'; };
+})();
+</script>
+</body>
+</html>

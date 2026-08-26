@@ -1,0 +1,96 @@
+<div id="viewport">
+<div id="stage">
+  <canvas id="board"></canvas>
+  <div id="lightpool"></div>
+  <div id="grain" class="amb"></div>
+
+  <!-- Pre-load curtain, inherited from the starter with this game's plate. -->
+  <div id="lockerroom" role="status" aria-label="Loading replay">
+    <div class="lk-art" id="lk-art" aria-hidden="true">
+      <img class="lk-bg" id="lk-bg" alt="">
+      <div class="lk-sprites" id="lk-sprites"></div>
+    </div>
+    <div class="lk-glow" aria-hidden="true"></div>
+    <div class="lk-cap" id="lk-cap" aria-hidden="true">Sealing the airlock&hellip;</div>
+    <div class="lk-bar" aria-hidden="true"><i></i></div>
+    <div class="lk-sub">Station airlock &middot; Loading replay</div>
+  </div>
+
+  <div id="chrome">
+    <!-- Two plates, keyed crew and impostor, on the starter's own plate
+         machinery: headline, big numeral, label, subline. -->
+    <div id="scorebug">
+      <div class="plates" id="plates-l"></div>
+
+      <div class="clock-col">
+        <div class="clock amb" id="clock">
+          <div class="time" id="clock-time">0:00</div>
+          <span class="ffwd-mini" id="ffwd-mini">&#9656;&#9656;</span>
+          <div class="caption" id="clock-caption">Sealing the airlock</div>
+        </div>
+      </div>
+
+      <div class="plates" id="plates-r"></div>
+    </div>
+
+    <!-- HIDDEN-AGENDA: the roster strip (spectator-side role reveal) and the
+         vote board. Both are clipped to the board region between --topband and
+         --band; neither sits in the transport band. -->
+    <div id="rosterstrip"></div>
+    <div id="voteboard">
+      <div id="vb-head">MEETING</div>
+      <div id="vb-rows"></div>
+      <div id="vb-count">RESOLVES IN &mdash;</div>
+    </div>
+
+    <div id="bannerlane"></div>
+    <div id="killfeed"></div>
+
+    <div id="transport">
+      <!-- Buttons on top, scrubber/timeline below (the transport sits in its own
+           reserved band under the board, so nothing here overlaps play). -->
+      <div class="tbar">
+        <button class="tbtn" id="btn-restart" title="Restart (,)">&#10226;</button>
+        <button class="tbtn" id="btn-back" title="Back one tick (b)">&#9666;|</button>
+        <button class="tbtn" id="btn-play" title="Play / pause (space)">&#9654;</button>
+        <button class="tbtn" id="btn-fwd" title="Skip +5s (.)">+5s</button>
+        <button class="tbtn" id="btn-end" title="Jump to end (e)">|&#9656;</button>
+        <button class="tbtn" id="btn-loop" title="Loop (r)">&#8635;</button>
+        <button class="tbtn" id="btn-skip" title="Auto-skip lulls (f)">&#9656;&#9656;</button>
+        <button class="tbtn" id="btn-spoilers" title="Spoilers: meetings / freezes / ejections / winner on the timeline ahead of the playhead (o)">spoilers</button>
+        <span class="ffwd-chip" id="ffwd-chip">&#9656;&#9656; SKIPPING LULL</span>
+        <span class="win-chip" id="win-chip"></span>
+        <span class="tick-clock" id="tick-clock">0 / 0</span>
+        <span class="tsep"></span>
+        <div class="speedchips" id="speedchips"></div>
+      </div>
+      <div class="scrub" id="scrub">
+        <!-- momentum graph sits UNDERNEATH the seek track, on the SAME tick/mx
+             axis, so the playhead crosses it 1:1 with the timeline -->
+        <svg class="momentum" id="momentum" viewBox="0 0 1000 100"
+             preserveAspectRatio="none" aria-hidden="true"></svg>
+        <span class="momentum-label">RACE TO WIN</span>
+        <div class="scrub-track"></div>
+        <div class="scrub-fill" id="scrub-fill"></div>
+        <!-- lull shading rides ABOVE track+fill so the quiet stretches read
+             dimmed whether played or not; the amber head still wins (z:3) -->
+        <div id="lulls"></div>
+        <div class="scrub-win" id="scrub-win"></div>
+        <div class="scrub-head" id="scrub-head"></div>
+      </div>
+    </div>
+
+    <div id="endcard">
+      <div class="headline" id="ec-headline">&mdash;</div>
+      <div class="wincond" id="ec-wincond"></div>
+      <div class="how" id="ec-how"></div>
+      <!-- HIDDEN-AGENDA: the role reveal table. -->
+      <div id="ec-roles"></div>
+      <div class="ec-teams" id="ec-teams"></div>
+      <div class="ec-replay" id="ec-replay"></div>
+    </div>
+  </div>
+
+  <div id="status">connecting</div>
+</div>
+</div>

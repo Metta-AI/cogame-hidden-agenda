@@ -1,0 +1,239 @@
+
+/* ============================================================
+   HIDDEN-AGENDA additions to the inherited coworld-ctf chrome.
+   Everything ABOVE this block is the starter's CSS, kept verbatim except for
+   the four element families the design note removes (#viewpanel + children,
+   #fpv + children, #povBadge, #mmwarn). Everything BELOW is this game's own:
+   the two plate sublines, the roster strip with the spectator role reveal, the
+   vote board, the CAUGHT! banner, the beat-marker rules and the 360px rules.
+
+   Nothing here touches the transport band. relayout() still owns --hudscale,
+   --topband and --band on :root; the endcard still stops at
+   bottom: var(--band, 0px) and is still dismissed by every seek; and every
+   scrubber beat this block draws is a LABELLED, CLICKABLE BUTTON that seeks on
+   click, styled for EVERY kind the sim emits: meeting, freeze, caught, eject,
+   deposit, gameover. The builder is named buildAgendaBeats precisely so it can
+   never be shadowed by the chrome alias block's own hoisted declaration of
+   markBeat (cogame-tandem, 2026-08-23).
+   ============================================================ */
+
+/* --- plate identity --------------------------------------------------- */
+.plate.crew { --tc: #3f7cc4; }
+.plate.impostor { --tc: #e0523a; }
+
+/* The plate name must survive a 360px featured-match iframe: it grows into
+   whatever room the plate has and ellipsises only when it genuinely runs out,
+   never collapsing to a bare "…". */
+.plate-name {
+  flex: 1 1 auto;
+  min-width: 3.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plate .ha-sub {
+  font-family: var(--finefont);
+  font-size: calc(8 * var(--u));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  white-space: nowrap;
+  margin-top: calc(3 * var(--u));
+}
+.plate.side-r .ha-sub { text-align: right; }
+.plate .cooldown {
+  display: inline-flex;
+  gap: calc(2 * var(--u));
+  margin-left: calc(5 * var(--u));
+  vertical-align: middle;
+}
+.plate .cooldown i {
+  width: calc(5 * var(--u));
+  height: calc(5 * var(--u));
+  background: var(--tc, var(--amber));
+  opacity: 0.28;
+  display: inline-block;
+}
+.plate .cooldown i.on { opacity: 1; }
+
+/* --- roster strip: five chips under the scorebug ---------------------- */
+/* Clipped to the board region between --topband and --band: no overlay ever
+   sits inside the transport band. */
+#rosterstrip {
+  position: absolute;
+  top: calc(var(--topband, 0px) + 5 * var(--u));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: calc(5 * var(--u));
+  z-index: 8;
+  pointer-events: none;
+  max-width: 96%;
+}
+.rchip {
+  display: flex;
+  align-items: center;
+  gap: calc(4 * var(--u));
+  padding: calc(2 * var(--u)) calc(6 * var(--u));
+  background: var(--ink-soft);
+  font-family: var(--finefont);
+  font-size: calc(8 * var(--u));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--paper);
+  white-space: nowrap;
+  box-shadow: inset calc(3 * var(--u)) 0 0 var(--tc, var(--amber));
+}
+.rchip.imp { box-shadow: inset calc(3 * var(--u)) 0 0 var(--tc, var(--amber)), 0 0 0 calc(1.5 * var(--u)) var(--red); }
+.rchip .rglyph { color: var(--tc, var(--paper)); font-family: var(--pixfont); }
+.rchip.frozen { opacity: 0.62; }
+.rchip.ejected { opacity: 0.35; text-decoration: line-through; }
+.rchip .rpol { color: var(--paper-dim); }
+
+/* --- vote board: five VOTER -> TARGET rows, centre-right of the board -- */
+#voteboard {
+  position: absolute;
+  right: calc(10 * var(--u));
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  flex-direction: column;
+  gap: calc(3 * var(--u));
+  padding: calc(7 * var(--u)) calc(9 * var(--u));
+  background: rgba(12, 9, 6, 0.82);
+  box-shadow: inset 0 0 0 calc(1 * var(--u)) rgba(242, 232, 216, 0.16);
+  z-index: 9;
+  pointer-events: none;
+  max-height: calc(100% - var(--topband, 0px) - var(--band, 0px));
+}
+#voteboard.on { display: flex; }
+#vb-head {
+  font-family: var(--finefont);
+  font-size: calc(9 * var(--u));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--amber);
+  white-space: nowrap;
+}
+#vb-count {
+  font-family: var(--finefont);
+  font-size: calc(8 * var(--u));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+.vrow {
+  display: flex;
+  align-items: center;
+  gap: calc(5 * var(--u));
+  font-family: var(--pixfont);
+  font-size: calc(11 * var(--u));
+  color: var(--paper);
+  opacity: 0.4;
+  transition: opacity 160ms ease;
+}
+.vrow.filled { opacity: 1; }
+.vrow.switched { color: var(--amber); }
+.vrow .vfrom { color: var(--tc, var(--paper)); min-width: 3.4em; }
+.vrow .varrow { color: var(--paper-dim); }
+.vrow .vto { color: var(--paper); }
+.vrow .vtally {
+  margin-left: auto;
+  font-family: var(--finefont);
+  font-size: calc(8 * var(--u));
+  color: var(--amber);
+}
+
+/* --- CAUGHT! banner: the starter's own lane, one extra kind ----------- */
+.banner-chip.caught {
+  border-bottom-color: var(--red);
+  background: rgba(224, 82, 58, 0.20);
+  font-size: calc(15 * var(--u));
+  white-space: nowrap;
+}
+.banner-chip.quiet { border-bottom-color: var(--ghost); color: var(--paper-dim); }
+.banner-chip.meeting { border-bottom-color: var(--amber); }
+
+/* --- endcard role reveal ---------------------------------------------- */
+#ec-roles {
+  display: flex;
+  flex-direction: column;
+  gap: calc(3 * var(--u));
+  margin: calc(8 * var(--u)) 0;
+  font-family: var(--pixfont);
+  font-size: calc(11 * var(--u));
+}
+#ec-roles .erow {
+  display: flex;
+  gap: calc(8 * var(--u));
+  align-items: baseline;
+  justify-content: center;
+}
+#ec-roles .erow .ealias { color: var(--tc, var(--paper)); min-width: 4em; }
+#ec-roles .erow .erole {
+  font-family: var(--finefont);
+  font-size: calc(8 * var(--u));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-dim);
+}
+#ec-roles .erow.imp .erole { color: var(--red); }
+#ec-roles .erow .epol { color: var(--paper-dim); }
+
+/* --- scrubber beats: one rule per kind the sim emits ------------------ */
+/* Buttons, not divs: each carries a title + aria-label and seeks on click. */
+button.beat-marker {
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  appearance: none;
+  background: var(--paper-dim);
+}
+.beat-marker.meeting {
+  background: var(--amber);
+  width: calc(2 * var(--u));
+  height: calc(11 * var(--u));
+}
+.beat-marker.freeze {
+  background: #bfe9f7;
+  width: calc(2 * var(--u));
+  height: calc(9 * var(--u));
+}
+.beat-marker.caught {
+  background: var(--red);
+  width: calc(3 * var(--u));
+  height: calc(13 * var(--u));
+}
+.beat-marker.eject {
+  background: var(--paper);
+  width: calc(3 * var(--u));
+  height: calc(12 * var(--u));
+}
+.beat-marker.deposit {
+  background: var(--blue);
+  width: calc(2 * var(--u));
+  height: calc(6 * var(--u));
+  opacity: 0.8;
+}
+.beat-marker.gameover {
+  background: var(--amber);
+  width: calc(3 * var(--u));
+  height: calc(14 * var(--u));
+}
+
+/* --- the pre-load curtain must not swallow transport clicks ----------- */
+/* Its ~1.5s fade sat over the whole stage and ate the first scrub (ecos,
+   2026-08-23). */
+#lockerroom { pointer-events: none; }
+
+/* --- 360px: the featured-match iframe --------------------------------- */
+/* Under 640px of board the plate labels and sublines go, the plates read
+   "CREW 21" / "IMPOSTOR 3", the roster chips drop their policy names and the
+   vote board shortens its aliases to three letters. */
+#stage.tiny .plate .lives-label,
+#stage.tiny .plate .ha-sub,
+#stage.tiny .rchip .rpol { display: none; }
+#stage.tiny #rosterstrip { gap: calc(3 * var(--u)); }
+#stage.tiny .rchip { padding: calc(1 * var(--u)) calc(4 * var(--u)); }
+#stage.tiny #voteboard { right: calc(4 * var(--u)); padding: calc(4 * var(--u)) calc(5 * var(--u)); }
+#stage.tiny .vrow { font-size: calc(10 * var(--u)); }
+#stage.tiny .banner-chip.caught { font-size: calc(11 * var(--u)); }

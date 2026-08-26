@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Agenda &mdash; Seat</title>
+<style>
+  html, body {
+    margin: 0; height: 100%;
+    background: #16110d; color: #f2e8d8;
+    font: 14px/1.5 'Courier New', monospace;
+  }
+  main { max-width: 44em; margin: 0 auto; padding: 3em 1.5em; }
+  h1 { font-size: 1.4em; letter-spacing: 0.18em; text-transform: uppercase;
+       color: #e8a33d; }
+  code { color: #8fe3f0; }
+  p { color: #b8ac98; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hidden Agenda &mdash; seat page</h1>
+  <p>
+    This page is informational. A Hidden Agenda policy is a PROMPT: the seat
+    process connects to <code>/player</code>, delivers its
+    <code>PLAYER_PROMPT</code> (or <code>PLAYER_SCRIPTED=miner|lurker</code>)
+    once, and then only listens. Every decision is made inside the game
+    container, which is what lets all five seats be asked in one parallel batch
+    at each decision point.
+  </p>
+  <p>
+    This page never opens the player websocket. The certifier fetches it before
+    the player pods start, so opening a seat socket here would take the slot the
+    real seat needs.
+  </p>
+  <p>
+    Watch the game at <code>/client/global</code>.
+  </p>
+</main>
+</body>
+</html>
