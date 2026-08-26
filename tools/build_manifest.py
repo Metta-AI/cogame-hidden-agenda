@@ -304,6 +304,17 @@ MANIFEST = {
             "resolveTick": 23,
             "maxTicks": 900,
             "depositTarget": 12,
+            # The soak in ci.yml's wasm-viewer job plays the replay this
+            # fixture produces for 10 s at 1x, so a replay barely longer than
+            # the soak reports a FINISHED playback as a frozen one (ecos,
+            # 2026-08-23). At the shipped 260-tick cooldown the lurker's second
+            # freeze lands at t=318 and the episode ends at 343 ticks = 14.3 s,
+            # a 4.3 s margin. 500 pushes the second freeze out to t=558: 608
+            # ticks = 25.3 s, still ending impostor_ejected with 2 witnessed
+            # freezes, 4 meetings and 15 votes, so every headline surface is
+            # still exercised with 2.5x the soak window.
+            # tests/test_manifest.nim plays it and asserts the length.
+            "freezeCooldownTicks": 500,
             "minBatchSeconds": 0,
             "playerConnectTimeoutSeconds": 120,
             "players": PLAYERS,

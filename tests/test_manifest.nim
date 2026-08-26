@@ -239,8 +239,9 @@ block theCertificationEpisodeActuallyPlays:
     check(kind != skNone, "every certification seat names a real baseline")
   let episode = playEpisode(config, kinds)
   let seconds = episode.frames.len.float / TargetFps.float
-  check(seconds > 12.0,
-    "the certification replay must outlast the 10 s viewer soak, it is " &
+  check(seconds > 20.0,
+    "the certification replay must comfortably outlast the 10 s viewer soak " &
+    "(twice over, not the 4.3 s margin the 260-tick cooldown left), it is " &
     $seconds & " s (" & $episode.frames.len & " ticks)")
   check(episode.reason == "complete",
     "the fixture must end complete, got " & episode.reason)

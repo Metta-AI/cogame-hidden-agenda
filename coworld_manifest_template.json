@@ -632,6 +632,7 @@
       "resolveTick": 23,
       "maxTicks": 900,
       "depositTarget": 12,
+      "freezeCooldownTicks": 500,
       "minBatchSeconds": 0,
       "playerConnectTimeoutSeconds": 120,
       "players": [
