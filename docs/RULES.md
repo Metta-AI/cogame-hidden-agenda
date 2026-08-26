@@ -7,10 +7,14 @@ Five seats, one cog each: **four crew and exactly one impostor**.
 | slot | alias | colour | spawn (rotation offset 0) |
 |---|---|---|---|
 | 0 | `RED` | red | (13, 7) |
-| 1 | `BLUE` | blue | (11, 7) |
-| 2 | `GREEN` | green | (15, 7) |
-| 3 | `YELLOW` | yellow | (11, 11) |
-| 4 | `PINK` | pink | (15, 11) |
+| 1 | `BLUE` | blue | (9, 7) |
+| 2 | `GREEN` | green | (17, 7) |
+| 3 | `YELLOW` | yellow | (9, 11) |
+| 4 | `PINK` | pink | (17, 11) |
+
+No two spawn cells are inside the freeze beam's reach: the closest pair is
+Chebyshev 4 against `freezeRange = 2`, so a `strike` impostor cannot freeze
+anybody on tick one.
 
 Aliases are fixed to slots and never rotate, so a vote for `PINK` is
 unambiguously a vote for the pink cog on screen. The **spawn list is rotated by
@@ -86,7 +90,7 @@ cog `p` iff **both**:
 
 1. `los(p.cell, c)` is clear — the supercover walk crosses no `#` wall and no
    `S` seam (endpoints excluded); **and**
-2. `chebyshev(p.cell, c) ≤ awarenessRadius = 2`, **or**
+2. `chebyshev(p.cell, c) ≤ awarenessRadius = 4`, **or**
    `chebyshev(p.cell, c) ≤ visionRadius = 8` and `c` lies in `p`'s facing
    quadrant (`N`: `dy < 0 and abs(dx) <= -dy`, and the same wedge rotated).
 
@@ -125,7 +129,7 @@ may freeze something beside or behind you.
 
 On success the target becomes **frozen** at its cell, permanently: it stops
 acting, does not vote, and its carried gems are lost. `freezeCooldown` is set to
-`freezeCooldownTicks = 220`. At most one freeze resolves per tick, and freezes
+`freezeCooldownTicks = 260`. At most one freeze resolves per tick, and freezes
 never happen during a meeting.
 
 ## The witness trigger
@@ -147,8 +151,12 @@ reaching 0 (reset at the end of every meeting), and a witnessed freeze. There is
 **no report button and no emergency button**.
 
 On open, all active cogs are saved and teleported to five fixed seats around the
-grate — (11,8) (15,8) (11,10) (15,10) (13,11) — assigned in slot order, each
-facing the grate centre. Frozen cogs stay where they are. Positions and facings
+grate — (11,8) (15,8) (11,10) (15,10) (13,11) — assigned among the active
+seats by where each cog was **standing** when the meeting opened, sorted by
+`(row, col)`, each facing the grate centre. Deliberately not slot order: the
+decision batch is issued after the teleport, so a slot-ordered assignment would
+plan slot 0 from (11,8) and slot 4 from (13,11) at every meeting of every
+episode and make the crew-win rate depend on which slot drew the impostor. Frozen cogs stay where they are. Positions and facings
 are restored exactly at the end.
 
 | offset from `m0` | `hidden-agenda` (chat, 60) | `-notalk` / `-blind` (25) |
@@ -223,8 +231,13 @@ Seats resolve in ascending slot order, seams in `S1..S6` order.
    rows and, if W is non-empty, `caught` — and arms an immediate meeting.
 5. **Deposits resolve.**
 6. **Mining resolves.**
-7. **Moves resolve** against the live board: a move into a cell a lower-numbered
-   seat already took this tick degrades to `wait`.
+7. **Moves resolve** against the live board, in a multi-pass sweep that repeats
+   until nothing more can move. A contested free cell goes to the cog standing
+   at the smaller `(row, col)` — not the lower slot — and a final pass lets two
+   cogs whose targets are each other's cells **swap**. A move that still cannot
+   land degrades to `wait`. The sweep is what stops two cogs deadlocking a
+   corridor for the rest of an episode; it is deterministic, but the realised
+   step depends on where the other cogs stand, not on the map alone.
 8. **Facing** for non-movers, per the job rule.
 9. **FOV and memory**: `lastSeen`, `bodies`, `togetherTicks`, `youWitnessed`.
 10. **Win check**, in order: 32 deposits → crew; the impostor ejected → crew;

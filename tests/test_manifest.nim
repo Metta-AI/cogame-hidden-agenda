@@ -8,7 +8,7 @@
 
 import std/[json, os, strutils]
 import support/helpers
-import hidden_agenda/[sim_types, sim_config, sim, scripted]
+import hidden_agenda/[sim_types, station, sim_config, sim, scripted]
 
 template check(condition: bool, message: string) =
   if not condition:
@@ -259,6 +259,58 @@ block theCertificationEpisodeActuallyPlays:
     "and a WITNESSED one, so the CAUGHT! banner is exercised by CI")
   check(votes >= 1, "and a vote, so the vote board is exercised")
   check(episode.meetings.len >= 1, "and at least one meeting")
+
+block docsQuoteTheRealConstants:
+  ## tools/build_manifest.py inlines README.md, docs/RULES.md, docs/POLICIES.md
+  ## and docs/PROTOCOL.md into game.docs / game.protocols, so a doc that
+  ## disagrees with the code is ON THE PLATFORM PAGE, not just in the repo.
+  ## Six of them did. Every `<constant> = <number>` in the shipped docs is
+  ## checked against the config the game actually runs.
+  let config = defaultGameConfig()
+  let pairs = {
+    "maxTicks": config.maxTicks,
+    "depositTarget": config.depositTarget,
+    "carryCap": config.carryCap,
+    "mineTicks": config.mineTicks,
+    "seamCapacity": config.seamCapacity,
+    "seamRegrowTicks": config.seamRegrowTicks,
+    "moveCooldown": config.moveCooldown,
+    "freezeRange": config.freezeRange,
+    "freezeCooldownTicks": config.freezeCooldownTicks,
+    "visionRadius": config.visionRadius,
+    "awarenessRadius": config.awarenessRadius,
+    "sweepTicks": config.sweepTicks,
+    "meetingCadenceTicks": config.meetingCadenceTicks
+  }
+  var quoted = 0
+  for docPath in ["README.md", "docs/RULES.md", "docs/POLICIES.md",
+      "docs/PROTOCOL.md"]:
+    let text = readFile(RepoRoot / docPath)
+    for name, value in pairs.items:
+      var start = 0
+      while true:
+        let hit = text.find(name & " = ", start)
+        if hit < 0:
+          break
+        var index = hit + name.len + 3
+        var digits = ""
+        while index < text.len and text[index] in '0' .. '9':
+          digits.add(text[index])
+          index.inc
+        check(digits.len > 0 and parseInt(digits) == value,
+          docPath & " says " & name & " = " & digits & "; the game runs " &
+          $value)
+        quoted.inc
+        start = hit + 1
+  check(quoted >= 8,
+    "the docs must actually quote the constants, matched " & $quoted)
+
+  ## And the spawn table, which named two cells inside the freeze beam's reach.
+  let rules = readFile(RepoRoot / "docs" / "RULES.md")
+  for cell in SpawnCells:
+    check(("(" & $cell[0] & ", " & $cell[1] & ")") in rules,
+      "docs/RULES.md must list the real spawn cell (" & $cell[0] & ", " &
+      $cell[1] & ")")
 
 block everyVariantConstructs:
   ## Test EVERY variant's game_config, not just the fixture: a config-scaled

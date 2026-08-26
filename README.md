@@ -19,7 +19,7 @@ Watch it: <https://softmax.com/hidden-agenda>
 
 ## The catch
 
-Vision is a **90° cone on your facing**, out to 8 cells, plus 2 cells in every
+Vision is a **90° cone on your facing**, out to 8 cells, plus 4 cells in every
 direction, and walls and gem seams block both. Vision is therefore **not
 mutual**: somebody standing behind you sees you and you do not see them. That
 asymmetry is the whole game. The impostor can check that its own view is empty

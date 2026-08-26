@@ -56,7 +56,7 @@ in it is visible to that seat; **nothing else is**.
  "meetings":[{"n":3,"t":600,"cause":"cadence","votes":{},"switched":{},
               "outcome":"skip","ejected":null,"say":{}}],
  "notes":"red has been in NW since 640",
- "vision":{"visionRadius":8,"awarenessRadius":2,
+ "vision":{"visionRadius":8,"awarenessRadius":4,
            "cone":"90 degrees on your facing"},
  "rules":{"role":"you are CREW. Exactly ONE of the other four cogs is the impostor."}}
 ```
