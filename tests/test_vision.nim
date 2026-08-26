@@ -93,21 +93,43 @@ block frozenIsStillEvidence:
 
 block recordedMaskMatches:
   ## The recorded `v` bitmask equals a recomputed `visible()` for every cog on
-  ## every tick of a full episode.
+  ## EVERY tick of a full episode — not just the terminal frame.
+  ##
+  ## The re-derivation reads nothing but the frame's own `c` array (x, y,
+  ## facing, state code), exactly as a viewer holding the replay bytes would,
+  ## and recomputes the mask through the production `seesCog`. A frame whose
+  ## `v` disagreed with its own `c` would mean the recording is a parallel
+  ## channel rather than a function of the recorded state.
   var config = baseConfig(7)
   config.maxTicks = 600
   let sim = playEpisode(config, uniformKinds(skMiner))
   check(sim.frames.len > 100, "the episode must actually run")
-  ## Replay the episode once more and compare the mask at the terminal state.
-  for slot in 0 ..< Seats:
-    var expected = 0
-    for other in 0 ..< Seats:
-      if seesCog(sim.config, sim.cogs[slot], sim.cogs[other]):
-        expected = expected or (1 shl other)
-    check(sim.frames[^1].v[slot] == expected,
-      "the recorded visibility mask must equal a recomputed one for slot " &
-      $slot)
-    check((sim.frames[^1].v[slot] and (1 shl slot)) == 0,
-      "a cog's own bit is always 0")
+  var compared = 0
+  for frame in sim.frames:
+    ## Rebuild the whole roster from this frame alone.
+    var cogs: array[Seats, Cog]
+    for slot in 0 ..< Seats:
+      let base = slot * 6
+      cogs[slot] = Cog(slot: slot, x: frame.c[base], y: frame.c[base + 1],
+        facing: Facing(frame.c[base + 2]),
+        state: (case frame.c[base + 3]
+                of 3: csFrozen
+                of 4: csEjected
+                else: csActive),
+        carry: frame.c[base + 4], mineProgress: frame.c[base + 5])
+    for slot in 0 ..< Seats:
+      var expected = 0
+      for other in 0 ..< Seats:
+        if seesCog(sim.config, cogs[slot], cogs[other]):
+          expected = expected or (1 shl other)
+      check(frame.v[slot] == expected,
+        "tick " & $frame.t & ": the recorded visibility mask for slot " &
+        $slot & " (" & $frame.v[slot] & ") must equal the one recomputed " &
+        "from that frame's own positions (" & $expected & ")")
+      check((frame.v[slot] and (1 shl slot)) == 0,
+        "tick " & $frame.t & ": a cog's own bit is always 0")
+      compared.inc
+  check(compared == sim.frames.len * Seats,
+    "every slot on every frame must have been compared, got " & $compared)
 
 echo "test_vision: ok"

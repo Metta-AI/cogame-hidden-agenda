@@ -5,7 +5,8 @@
 
 import std/[json, strutils, tables, unicode]
 import support/helpers
-import hidden_agenda/[sim_types, station, sim_config, sim_state, sim, replays]
+import hidden_agenda/[sim_types, station, sim_config, sim_state, vision, sim,
+  replays, global]
 
 template check(condition: bool, message: string) =
   if not condition:
@@ -150,6 +151,142 @@ block runeTruncation:
     else:
       discard
   check(sawSay, "the chat variant must actually record a say")
+
+block eventsReDeriveEveryFrame:
+  ## Acceptance item 2, the frame-by-frame half: replaying the recorded EVENTS
+  ## through the sim's own rules must reproduce the recorded per-tick state on
+  ## EVERY frame, and the viewer's packet must come out of that same array
+  ## rather than a parallel recording.
+  ##
+  ## Everything below is derived from the replay BYTES alone — the events, the
+  ## config constants and each frame's own `c` array — and compared against the
+  ## frame the writer recorded:
+  ##   * `d`  from the `deposit` rows;
+  ##   * `g`  from the `mine` and `seam` rows against `seamCapacity`;
+  ##   * `ph` from the `meeting` rows against the four meeting tick offsets;
+  ##   * `v`  from the frame's own positions through `seesCog`.
+  var config = baseConfig(9, "hidden-agenda")
+  config.impostorSlot = 4
+  let sim = playEpisode(config, uniformKinds(skMiner))
+  let replay = parseReplay(replayBytes(sim))
+  check(replay.frames.len > 100,
+    "the episode must be a real one, got " & $replay.frames.len & " frames")
+
+  ## --- fold the event log forward, one tick at a time --------------------
+  var deposits = 0
+  var gems: array[6, int]
+  for i in 0 ..< gems.len:
+    gems[i] = replay.config.seamCapacity
+  ## Meeting phase: every meeting's open tick, replayed against the offsets.
+  var phaseAt = newSeq[int](replay.frames.len)
+  for tick, node in replay.eventsByTick.pairs:
+    for row in node:
+      if row{"k"}.getStr() != "meeting":
+        continue
+      for offset in 0 ..< replay.config.meetingTicks:
+        let t = tick + offset
+        if t >= phaseAt.len:
+          break
+        var phase = ord(mpOpen)
+        if replay.config.chat and replay.config.sayTick >= 1 and
+            offset >= replay.config.sayTick:
+          phase = ord(mpSaid)
+        if offset >= replay.config.revealTick: phase = ord(mpVoted)
+        if offset >= replay.config.switchTick: phase = ord(mpSwitched)
+        if offset >= replay.config.resolveTick: phase = ord(mpResolved)
+        phaseAt[t] = phase
+
+  var meetingsSeen = 0
+  var minesSeen = 0
+  var depositsSeen = 0
+  for frame in replay.frames:
+    ## Step 1 + steps 5-6 of the tick, replayed from the rows at THIS tick, in
+    ## the order the sim emitted them (regrow before mining, as in sim.nim).
+    if replay.eventsByTick.hasKey(frame.t):
+      for row in replay.eventsByTick[frame.t]:
+        case row{"k"}.getStr()
+        of "seam":
+          var index = -1
+          for i, seam in SeamTable:
+            if seam.id == row{"id"}.getStr(): index = i
+          check(index >= 0, "a seam row names a real seam")
+          gems[index] = row{"gems"}.getInt()
+        of "mine":
+          var index = -1
+          for i, seam in SeamTable:
+            if seam.id == row{"id"}.getStr(): index = i
+          check(index >= 0, "a mine row names a real seam")
+          gems[index].dec
+          minesSeen.inc
+        of "deposit":
+          deposits.inc
+          depositsSeen.inc
+          check(row{"total"}.getInt() == deposits,
+            "tick " & $frame.t & ": the deposit row's running total (" &
+            $row{"total"}.getInt() & ") must equal the re-derived count (" &
+            $deposits & ")")
+        of "meeting":
+          meetingsSeen.inc
+        else: discard
+
+    check(frame.d == deposits,
+      "tick " & $frame.t & ": recorded deposits " & $frame.d &
+      " != the count re-derived from the deposit rows " & $deposits)
+    for i in 0 ..< gems.len:
+      check(frame.g[i] == gems[i],
+        "tick " & $frame.t & ": recorded gems for " & SeamTable[i].id & " (" &
+        $frame.g[i] & ") != the count re-derived from the mine/seam rows (" &
+        $gems[i] & ")")
+    check(frame.ph == phaseAt[frame.t],
+      "tick " & $frame.t & ": recorded meeting phase " & $frame.ph &
+      " != the phase re-derived from the meeting rows " & $phaseAt[frame.t])
+
+    ## And the visibility masks, from this frame's own cells and facings.
+    var cogs: array[Seats, Cog]
+    for slot in 0 ..< Seats:
+      let base = slot * 6
+      cogs[slot] = Cog(slot: slot, x: frame.c[base], y: frame.c[base + 1],
+        facing: Facing(frame.c[base + 2]),
+        state: (case frame.c[base + 3]
+                of 3: csFrozen
+                of 4: csEjected
+                else: csActive),
+        carry: frame.c[base + 4], mineProgress: frame.c[base + 5])
+    for slot in 0 ..< Seats:
+      var expected = 0
+      for other in 0 ..< Seats:
+        if seesCog(replay.config, cogs[slot], cogs[other]):
+          expected = expected or (1 shl other)
+      check(frame.v[slot] == expected,
+        "tick " & $frame.t & ": recorded v[" & $slot & "] " & $frame.v[slot] &
+        " != the mask re-derived from that frame's own positions " & $expected)
+
+  check(meetingsSeen >= 1 and minesSeen >= 1 and depositsSeen >= 1,
+    "the re-derivation must have actually replayed meetings, mines and " &
+    "deposits, saw " & $meetingsSeen & "/" & $minesSeen & "/" & $depositsSeen)
+
+  ## --- and the viewer reads that same array, tick by tick ----------------
+  ## `replayFrame` is the only source the bundle draws from: at every tick it
+  ## must hand back exactly `replay.frames[tick]`, so the viewer's display is
+  ## the re-derivation above and never a second recording.
+  for tick in 0 .. replay.maxTick():
+    let view = replayFrame(replay, tick)
+    let frame = replay.frames[tick]
+    check(view.t == frame.t, "the viewer frame at " & $tick & " is that tick")
+    check(view.deposits == frame.d and view.meetingPhase == frame.ph,
+      "tick " & $tick & ": the viewer's deposits/phase come off the frame")
+    check(view.gems == frame.g, "tick " & $tick & ": and its gem counts")
+    for slot in 0 ..< Seats:
+      let base = slot * 6
+      check(view.cogs[slot].x == frame.c[base] and
+            view.cogs[slot].y == frame.c[base + 1] and
+            view.cogs[slot].facing == frame.c[base + 2] and
+            view.cogs[slot].state == frame.c[base + 3] and
+            view.cogs[slot].carry == frame.c[base + 4] and
+            view.cogs[slot].mineProgress == frame.c[base + 5] and
+            view.cogs[slot].vis == frame.v[slot],
+        "tick " & $tick & ": the viewer's cog " & $slot &
+        " is the recorded frame's, field for field")
 
 block cleanTextIsRuneSafe:
   let text = "\u00e9\u00e9\u00e9\u00e9\u00e9"
