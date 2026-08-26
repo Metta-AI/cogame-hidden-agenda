@@ -18,7 +18,7 @@ The `state` frame (see [POLICIES.md](POLICIES.md)) at every decision point and
 once at episode end, then:
 
 ```json
-{"type":"final","done":true,"scores":[1,1,1,1,-4],"win":[true,true,true,true,false],
+{"type":"final","done":true,"slot":1,"scores":[1,1,1,1,-4],"win":[true,true,true,true,false],
  "winner":"crew","names":["RED","BLUE","GREEN","YELLOW","PINK"],
  "deposits":32,"ticks":1832,"reason":"complete","ending":"crew_deposits"}
 ```

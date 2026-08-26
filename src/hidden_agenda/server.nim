@@ -125,15 +125,17 @@ proc pushStateFrames(cause: string) =
     except CatchableError:
       discard
 
-proc finalFrame(): string =
+proc finalFrame(slot: int): string =
   let results = gameSim.resultsJson()
   var names = newJArray()
   for alias in Aliases:
     names.add(%alias)
-  ## NO roles[], NO impostorSlot, NO seed: nobody learns the answer from the
-  ## game, not even at the buzzer.
+  ## `slot` is THIS seat's own slot, the same field the `welcome` and `state`
+  ## frames carry, so a policy that multiplexes seats can tell whose buzzer
+  ## this is. NO roles[], NO impostorSlot, NO seed: nobody learns the answer
+  ## from the game, not even at the buzzer.
   $ %*{
-    "type": "final", "done": true,
+    "type": "final", "done": true, "slot": slot,
     "scores": results{"scores"}, "win": results{"win"},
     "winner": gameSim.winner, "names": names,
     "deposits": gameSim.deposits, "ticks": gameSim.frames.len,
@@ -141,7 +143,6 @@ proc finalFrame(): string =
   }
 
 proc broadcastFinal() =
-  let payload = finalFrame()
   var allowance = epochTime()
   for slot, socket in shared.playerSockets:
     allowance += 3.0
@@ -149,7 +150,7 @@ proc broadcastFinal() =
       echo "hidden-agenda: final broadcast past budget; skipping slot ", slot
       continue
     try:
-      socket.send(payload)
+      socket.send(finalFrame(slot))
     except CatchableError as error:
       echo "hidden-agenda: final frame to slot ", slot, " failed: ", error.msg
 

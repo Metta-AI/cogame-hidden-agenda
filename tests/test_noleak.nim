@@ -85,7 +85,7 @@ block noRolesInWelcomeOrFinal:
     "depositTarget": sim.config.depositTarget, "aliases": aliases}
   let results = sim.resultsJson()
   let final = $ %*{
-    "type": "final", "done": true, "scores": results{"scores"},
+    "type": "final", "done": true, "slot": 0, "scores": results{"scores"},
     "win": results{"win"}, "winner": sim.winner, "names": aliases,
     "deposits": sim.deposits, "ticks": sim.frames.len,
     "reason": sim.reason, "ending": sim.ending}
@@ -96,6 +96,8 @@ block noRolesInWelcomeOrFinal:
   check("\"role\":\"" in welcome,
     "the welcome DOES carry this seat's own role")
   check("\"role\"" notin final, "the final carries no role at all")
+  check("\"slot\":0" in final,
+    "the final DOES carry this seat's own slot, like welcome and state")
 
 block noSayInANoTalkEpisode:
   var config = baseConfig(21, "hidden-agenda-notalk")
