@@ -517,16 +517,38 @@ proc userPrompt*(sim: Sim, slot: int, prompt, cause: string): string =
   for room in RoomTable:
     roomIds.add(room.id)
   lines.add("")
-  lines.add("REPLY with ONLY {\"plan\":[{\"job\":...}], " &
+  ## Spell the plan step's SIBLING keys instead of `{"job":...}`. With an
+  ## ellipsis as the only structural example the model ever saw, it wrote the
+  ## compact form the system prompt teaches into the one key it was shown --
+  ## `{"job":"mine at:S2"}` -- and both attempts were rejected, so the seat
+  ## played scripted (hosted league rounds 2-4, 2026-08-26: 10 of round 3's
+  ## 14 attempt-failures were this). The argument goes BESIDE "job", so show
+  ## it, for this role and this moment.
+  lines.add("REPLY with ONLY {\"plan\":[<step>,...], " &
     (if sim.inMeeting: "\"vote\":\"<active alias or skip>\", " &
       "\"switch\":{\"if\":\"<active alias or tie>\",\"to\":" &
-      "\"<active alias or skip>\"}, " else: "") &
+      "\"<active alias or skip>\"} or null, " else: "") &
     (if sim.config.chat and sim.inMeeting:
       "\"say\":\"<=" & $MaxSayLen & " chars\", " else: "") &
     "\"hunch\":\"<=" & $MaxHunchLen & " chars\", \"notes\":\"<=" &
     $MaxNotesLen & " chars\"}")
-  lines.add("  plan: 1.." & $sim.config.planSteps & " steps; job is one of " &
-    jobList(cog.role))
+  lines.add("  plan: 1.." & $sim.config.planSteps & " steps; each <step> is " &
+    "ONE object whose argument is a SIBLING key of \"job\", never inside it:")
+  ## The `who` example names a cog that is active RIGHT NOW and is not this
+  ## seat, so a model that copies the shape verbatim still passes validation.
+  var whoExample = Aliases[(slot + 1) mod Seats]
+  for alias in sim.activeAliases():
+    if alias != Aliases[slot]:
+      whoExample = alias
+      break
+  lines.add("    {\"job\":\"mine\",\"at\":\"S2\"} {\"job\":\"deposit\"} " &
+    "{\"job\":\"watch\",\"who\":\"" & whoExample & "\"} " &
+    "{\"job\":\"patrol\",\"room\":\"NW\"} {\"job\":\"guard\"} " &
+    "{\"job\":\"hold\"}")
+  if cog.role == rImpostor:
+    lines.add("    {\"job\":\"hunt\",\"who\":\"" & whoExample & "\"} " &
+      "{\"job\":\"strike\",\"who\":\"" & whoExample & "\"} " &
+      "{\"job\":\"lurk\",\"room\":\"SE\"}")
   lines.add("  seam ids: " & seamIds.join(" ") & " \u00b7 room ids: " &
     roomIds.join(" "))
   lines.add("  aliases ACTIVE right now: " & sim.activeAliases().join(" "))
@@ -551,6 +573,21 @@ proc extractJsonObject*(text: string): JsonNode =
       "no JSON object in response: " & head)
   parseJson(text[start .. stop])
 
+proc splitCompactJob(text: string): tuple[job, arg: string] =
+  ## `"mine at:S2"` -> `("mine", "S2")`. The system prompt documents exactly
+  ## this compact form (`mine at:<seam>`, `watch who:<cog>`, `patrol room:<r>`,
+  ## and the impostor's `hunt`/`strike`/`lurk`), so a model that writes it into
+  ## the "job" key is following our own instructions and is honoured rather
+  ## than rejected. A bare job name comes back with an empty `arg`.
+  let parts = text.splitWhitespace()
+  if parts.len == 0:
+    return ("", "")
+  result.job = parts[0]
+  if parts.len > 1:
+    let rest = parts[1 .. ^1].join(" ")
+    let colon = rest.find(':')
+    result.arg = (if colon >= 0: rest[colon + 1 .. ^1] else: rest).strip()
+
 proc parseReply*(sim: Sim, slot: int, payload: JsonNode): Decision =
   ## Validates against the reply schema. Anything outside it is an INVALID
   ## REPLY, which the caller retries once with the hint and then falls back.
@@ -565,7 +602,11 @@ proc parseReply*(sim: Sim, slot: int, payload: JsonNode): Decision =
   for stepNode in planNode:
     if stepNode.kind != JObject:
       raise newException(HiddenAgendaError, "each plan step must be an object")
-    let jobText = stepNode{"job"}.getStr().strip().toLowerAscii()
+    ## The argument is read from the sibling key first and from the compact
+    ## `job` string only when that sibling is absent; the enums are upper-case
+    ## either way, so the compact argument is case-insensitive too.
+    let (jobText, inlineArg) = splitCompactJob(
+      stepNode{"job"}.getStr().strip().toLowerAscii())
     var job: JobKind
     var known = false
     for candidate in JobKind:
@@ -581,17 +622,23 @@ proc parseReply*(sim: Sim, slot: int, payload: JsonNode): Decision =
     var step = PlanStep(job: job)
     if job == jkMine:
       step.at = stepNode{"at"}.getStr().strip().toUpperAscii()
+      if step.at.len == 0:
+        step.at = inlineArg.toUpperAscii()
       if seamIndex(step.at) < 0:
         raise newException(HiddenAgendaError,
           "mine needs at: one of S1..S6, got '" & step.at & "'")
     if job in {jkWatch, jkHunt, jkStrike}:
       step.who = stepNode{"who"}.getStr().strip().toUpperAscii()
+      if step.who.len == 0:
+        step.who = inlineArg.toUpperAscii()
       if not sim.isActiveAlias(step.who) or step.who == Aliases[slot]:
         raise newException(HiddenAgendaError,
           "who: must name a cog that is active right now, got '" &
           step.who & "'")
     if job in {jkPatrol, jkLurk}:
       step.room = stepNode{"room"}.getStr().strip().toUpperAscii()
+      if step.room.len == 0:
+        step.room = inlineArg.toUpperAscii()
       if roomIndex(step.room) < 0:
         raise newException(HiddenAgendaError,
           "room: must be one of NW N NE SW S SE HUB, got '" & step.room & "'")
@@ -612,17 +659,24 @@ proc parseReply*(sim: Sim, slot: int, payload: JsonNode): Decision =
     if switchNode != nil and switchNode.kind == JObject:
       let condition = switchNode{"if"}.getStr().strip().toUpperAscii()
       let target = switchNode{"to"}.getStr().strip().toUpperAscii()
-      if condition.len == 0 or target.len == 0:
-        raise newException(HiddenAgendaError,
-          "switch needs both \"if\" and \"to\"")
-      if condition != "TIE" and not sim.isActiveAlias(condition):
-        raise newException(HiddenAgendaError,
-          "switch.if must be an active alias or tie, got '" & condition & "'")
-      if target != "SKIP" and not sim.isActiveAlias(target):
-        raise newException(HiddenAgendaError,
-          "switch.to must be an active alias or skip, got '" & target & "'")
-      result.switchIf = if condition == "TIE": "tie" else: condition
-      result.switchTo = if target == "SKIP": "skip" else: target
+      ## A HALF-WRITTEN switch degrades to "no conditional" instead of
+      ## invalidating the whole reply. The design note's reply-schema table
+      ## calls a malformed switch an invalid reply, but its governing intent is
+      ## degrade-never-hang, and the strict reading is what the retry-then-
+      ## fallback cost is measured against: in the hosted league (round 2,
+      ## 2026-08-26) `switch needs both "if" and "to"` threw away a seat's
+      ## whole plan and vote over an OPTIONAL field and put it on the scripted
+      ## baseline. A switch that names an inactive cog is still invalid --
+      ## that one is a claim about the roster, not a missing key.
+      if condition.len > 0 and target.len > 0:
+        if condition != "TIE" and not sim.isActiveAlias(condition):
+          raise newException(HiddenAgendaError,
+            "switch.if must be an active alias or tie, got '" & condition & "'")
+        if target != "SKIP" and not sim.isActiveAlias(target):
+          raise newException(HiddenAgendaError,
+            "switch.to must be an active alias or skip, got '" & target & "'")
+        result.switchIf = if condition == "TIE": "tie" else: condition
+        result.switchTo = if target == "SKIP": "skip" else: target
     elif switchNode != nil and switchNode.kind notin {JNull}:
       raise newException(HiddenAgendaError, "switch must be an object or null")
 

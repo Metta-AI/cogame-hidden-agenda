@@ -103,12 +103,16 @@ Exactly one JSON object whose first character is `{`.
 | `plan[].who` | enum | an alias `active` **now** | required for `watch`/`hunt`/`strike` |
 | `plan[].room` | enum | `NW` `N` `NE` `SW` `S` `SE` `HUB` | required for `patrol`/`lurk` |
 | `vote` | enum | an active alias, or `"skip"` | **required at a meeting** |
-| `switch` | object or null | `{"if": <alias>\|"tie", "to": <alias>\|"skip"}` | malformed or naming an inactive cog → invalid |
+| `switch` | object or null | `{"if": <alias>\|"tie", "to": <alias>\|"skip"}` | naming an inactive cog → invalid; missing one of the two keys → no conditional |
 | `say` | string | **90 chars**, truncated | chat variant only; ignored elsewhere |
 | `hunch` | string | **80 chars**, truncated | spectator-only |
 | `notes` | string | **240 chars**, truncated | private to you |
 
-Extra keys are ignored. Truncation is on **rune** boundaries.
+Extra keys are ignored. Truncation is on **rune** boundaries. A step's argument
+may also be written compactly inside `job` — `{"job":"mine at:S2"}` is read as
+`{"job":"mine","at":"S2"}`, and likewise `watch who:`, `patrol room:`,
+`hunt who:`, `strike who:`, `lurk room:` — because that is the form the system
+prompt teaches. The sibling key wins when both are present.
 
 An invalid reply is retried **once** in the same decision point's batch with a
 hint. Still failing → that seat plays the `miner` decision for that decision

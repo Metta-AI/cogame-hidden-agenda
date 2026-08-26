@@ -95,6 +95,86 @@ block meetingSchema:
   check(parses(sim, 0, "{" & plan & ",\"vote\":\"PINK\",\"switch\":null}"),
     "a null switch is no conditional at all")
 
+block theCompactJobFormTheSystemPromptTeachesIsHonoured:
+  ## The system prompt documents `mine at:<seam>` / `watch who:<cog>` /
+  ## `patrol room:<r>`, so a model that writes that string into "job" is
+  ## obeying our own instructions. Rejecting it burned both attempts and put
+  ## the seat on the scripted baseline (hosted league 2026-08-26: 10 of round
+  ## 3's 14 attempt-failures were `unknown job: mine at:s2` and the corrective
+  ## `mine needs at: ... got ''`).
+  var sim = rig()
+  proc plan(sim: Sim, slot: int, text: string): seq[PlanStep] =
+    parseReply(sim, slot, extractJsonObject(text)).plan
+
+  let compactMine = plan(sim, 0, "{\"plan\":[{\"job\":\"mine at:S2\"}]}")
+  let canonicalMine = plan(sim, 0,
+    "{\"plan\":[{\"job\":\"mine\",\"at\":\"S2\"}]}")
+  check(compactMine == canonicalMine,
+    "mine at:S2 parses to the same plan as the sibling-key form")
+  check(compactMine[0].job == jkMine and compactMine[0].at == "S2",
+    "and it is mine at S2")
+  check(plan(sim, 0, "{\"plan\":[{\"job\":\"mine at:s2\"}]}") == canonicalMine,
+    "the compact argument is case-insensitive, like the sibling key")
+
+  check(plan(sim, 0, "{\"plan\":[{\"job\":\"watch who:PINK\"}]}") ==
+    plan(sim, 0, "{\"plan\":[{\"job\":\"watch\",\"who\":\"PINK\"}]}"),
+    "watch who:PINK matches its canonical form")
+  check(plan(sim, 0, "{\"plan\":[{\"job\":\"patrol room:NW\"}]}") ==
+    plan(sim, 0, "{\"plan\":[{\"job\":\"patrol\",\"room\":\"NW\"}]}"),
+    "patrol room:NW matches its canonical form")
+  ## Slot 4 is the impostor in this rig.
+  check(plan(sim, 4, "{\"plan\":[{\"job\":\"hunt who:GREEN\"}]}") ==
+    plan(sim, 4, "{\"plan\":[{\"job\":\"hunt\",\"who\":\"GREEN\"}]}"),
+    "hunt who:GREEN matches its canonical form")
+  check(plan(sim, 4, "{\"plan\":[{\"job\":\"strike who:RED\"}]}") ==
+    plan(sim, 4, "{\"plan\":[{\"job\":\"strike\",\"who\":\"RED\"}]}"),
+    "strike who:RED matches its canonical form")
+  check(plan(sim, 4, "{\"plan\":[{\"job\":\"lurk room:SE\"}]}") ==
+    plan(sim, 4, "{\"plan\":[{\"job\":\"lurk\",\"room\":\"SE\"}]}"),
+    "lurk room:SE matches its canonical form")
+
+  ## Tolerance is only for the documented form: nothing else is loosened.
+  check(not parses(sim, 0, "{\"plan\":[{\"job\":\"teleport\"}]}"),
+    "a genuinely unknown job is still invalid")
+  check(not parses(sim, 0, "{\"plan\":[{\"job\":\"scuttle at:S2\"}]}"),
+    "and so is an unknown job carrying a compact argument")
+  check(not parses(sim, 0, "{\"plan\":[{\"job\":\"mine at:S9\"}]}"),
+    "a compact argument still has to name a real seam")
+  check(not parses(sim, 0, "{\"plan\":[{\"job\":\"hunt who:PINK\"}]}"),
+    "and crew still may not hunt in the compact form")
+
+  ## The other half of the fix: the reply schema in the prompt now spells the
+  ## sibling keys, so the model is never left to guess from `{"job":...}`.
+  let hint = userPrompt(sim, 0, "", "opening")
+  check("{\"job\":\"mine\",\"at\":\"S2\"}" in hint,
+    "the schema hint spells mine's sibling key")
+  check("{\"job\":\"patrol\",\"room\":\"NW\"}" in hint, "and patrol's")
+  check("{\"job\":\"watch\",\"who\":\"BLUE\"}" in hint,
+    "and watch's, naming a cog that is active now and is not this seat")
+  check("{\"job\":\"lurk\",\"room\":\"SE\"}" in userPrompt(sim, 4, "",
+    "opening"), "the impostor's jobs are spelled out too")
+  check(not ("{\"job\":\"lurk\"" in hint),
+    "and a crew seat is never shown an impostor-only job")
+  check(parses(sim, 0, "{\"plan\":[{\"job\":\"watch\",\"who\":\"BLUE\"}]}"),
+    "every step the hint shows is itself a valid step")
+
+block aHalfWrittenSwitchDegradesRatherThanInvalidating:
+  ## `switch` is optional. Throwing away a whole reply -- plan, vote and all --
+  ## because the model wrote one of the two keys cost real decisions in the
+  ## hosted league (round 2, 2026-08-26: `switch needs both "if" and "to"`).
+  var sim = rig()
+  sim.openMeetingForTest(mcCadence)
+  const plan = "\"plan\":[{\"job\":\"guard\"}]"
+  for half in ["{\"if\":\"tie\"}", "{\"to\":\"skip\"}", "{}"]:
+    let reply = "{" & plan & ",\"vote\":\"PINK\",\"switch\":" & half & "}"
+    check(parses(sim, 0, reply),
+      "a one-sided switch " & half & " does not invalidate the reply")
+    let decision = parseReply(sim, 0, extractJsonObject(reply))
+    check(decision.switchIf.len == 0 and decision.switchTo.len == 0,
+      "it degrades to no conditional at all")
+    check(decision.vote == "PINK" and decision.plan.len == 1,
+      "and the plan and the vote survive")
+
 block sayIsIgnoredNotRejected:
   var sim = rig("hidden-agenda-notalk")
   sim.openMeetingForTest(mcCadence)
