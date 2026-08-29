@@ -34,7 +34,9 @@ type
     maxTick*, maxTicks*, depositTarget*: int
     phase*: string                ## lobby | playing | gameover
     playing*, looping*, skipping*, fastForward*, enabled*: bool
-    speed*: int
+    speed*: float
+      ## What the speed chips highlight: 0.5 at the replay-only 1/2x, else
+      ## the integer playback speed.
     activeCrew*, impostorSlot*, freezeCooldown*, freezeCooldownTicks*: int
     meetingNumber*, meetingIn*: int
     meetingCause*: string

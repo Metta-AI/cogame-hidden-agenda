@@ -142,7 +142,7 @@ proc liveChrome*(sim: Sim, sendLead: bool): ViewChrome =
   result.phase = if sim.done: "gameover" else: "playing"
   result.playing = true
   result.enabled = false
-  result.speed = 1
+  result.speed = 1.0
   result.activeCrew = sim.activeCrew()
   result.impostorSlot = sim.impostorSlot
   result.freezeCooldown = sim.cogs[sim.impostorSlot].freezeCooldown
@@ -229,7 +229,7 @@ proc replayChrome*(replay: Replay, state: GlobalViewerState,
   result.phase = if tick >= replay.maxTick(): "gameover" else: "playing"
   result.playing = state.playback.playing
   result.enabled = true
-  result.speed = state.playback.speed()
+  result.speed = state.playback.displaySpeed()
   result.looping = state.playback.looping
   result.skipping = state.playback.skipLulls
   result.fastForward = state.playback.skipLulls and
