@@ -336,4 +336,34 @@ block cleanTextIsRuneSafe:
   check(cleanText("short", 40) == "short", "under the cap is untouched")
   check(oneLine("a\nb", 40) == "a b", "newlines become spaces")
 
+block halfSpeedIsAReplayOnlyCrawl:
+  ## The fleet-wide 1/2x replay speed: command '5' selects
+  ## ReplayHalfSpeedIndex, the chrome shows 0.5, and advance spends one tick
+  ## every OTHER presentation frame (halfPhase parity) outside lulls.
+  var replay = Replay()
+  for t in 0 .. 9:
+    replay.frames.add(ReplayFrame(t: t))
+  var playback = initPlayback()
+  playback.applyCommand(replay, "5")
+  check(playback.speedIndex == ReplayHalfSpeedIndex, "'5' must select 1/2x")
+  check(playback.displaySpeed() == 0.5,
+    "the chrome speed at 1/2x is 0.5, got " & $playback.displaySpeed())
+  check(playback.speed() == 1,
+    "the integer per-frame step clamps to 1 at 1/2x")
+  playback.skipLulls = false
+  playback.halfPhase = false
+  playback.advance(replay)
+  check(playback.tick == 1, "the odd frame at 1/2x spends one tick")
+  playback.advance(replay)
+  check(playback.tick == 1, "the even frame at 1/2x spends none")
+  playback.advance(replay)
+  check(playback.tick == 2, "so 1/2x is one tick every other frame")
+  playback.applyCommand(replay, "+")
+  check(playback.speedIndex == 0, "'+' from 1/2x lands on 1x")
+  playback.applyCommand(replay, "-")
+  check(playback.speedIndex == ReplayHalfSpeedIndex,
+    "'-' from 1x lands on 1/2x")
+  playback.applyCommand(replay, "-")
+  check(playback.speedIndex == ReplayHalfSpeedIndex, "1/2x is the floor")
+
 echo "test_replay: ok"

@@ -112,9 +112,18 @@ type
     tick*: int
     playing*: bool
     speedIndex*: int
+      ## Index into PlaybackSpeeds, or ReplayHalfSpeedIndex (-1) for the
+      ## replay-only 1/2x speed (one tick every other frame).
+    halfPhase*: bool
+      ## Frame parity while at 1/2x speed: the tick advances only on the odd
+      ## frames, toggled once per advance frame.
     looping*: bool
     skipLulls*: bool
     endHoldFrames*: int
+
+const ReplayHalfSpeedIndex* = -1
+  ## speedIndex sentinel for 1/2x playback: one tick every other frame.
+  ## The integer speed() clamps it back to PlaybackSpeeds[0] (1x).
 
 proc parseReplay*(data: string): Replay =
   let doc = parseJson(data)
@@ -176,7 +185,14 @@ proc initPlayback*(): Playback =
     skipLulls: false, endHoldFrames: 0)
 
 proc speed*(playback: Playback): int =
+  ## The integer per-frame step (1 while at 1/2x — the fractional pace lives
+  ## in advance's frame parity).
   PlaybackSpeeds[clamp(playback.speedIndex, 0, PlaybackSpeeds.high)]
+
+proc displaySpeed*(playback: Playback): float =
+  ## The speed the chrome shows: 0.5 at half speed, else the integer speed.
+  if playback.speedIndex == ReplayHalfSpeedIndex: 0.5
+  else: float(playback.speed())
 
 proc seek*(playback: var Playback, replay: Replay, tick: int) =
   playback.tick = clamp(tick, 0, replay.maxTick())
@@ -204,12 +220,13 @@ proc applyCommand*(playback: var Playback, replay: Replay, command: string) =
     of '2': playback.speedIndex = 1
     of '3': playback.speedIndex = 2
     of '4': playback.speedIndex = 3
+    of '5': playback.speedIndex = ReplayHalfSpeedIndex
     of '8': playback.speedIndex = 4
     of '6': playback.speedIndex = 5
     of '+', '=':
       playback.speedIndex = min(playback.speedIndex + 1, PlaybackSpeeds.high)
     of '-', '_':
-      playback.speedIndex = max(playback.speedIndex - 1, 0)
+      playback.speedIndex = max(playback.speedIndex - 1, ReplayHalfSpeedIndex)
     of ',', '<':
       playback.playing = false
       playback.seek(replay, 0)
@@ -259,7 +276,9 @@ proc isLullTick*(replay: Replay, tick: int): bool =
 
 proc advance*(playback: var Playback, replay: Replay) =
   ## One presentation frame. A looping replay does NOT restart the moment
-  ## playback stops: the final frame holds for two seconds first.
+  ## playback stops: the final frame holds for two seconds first. At 1/2x a
+  ## tick is spent only every other frame (halfPhase parity).
+  playback.halfPhase = not playback.halfPhase
   if not playback.playing:
     return
   if playback.tick >= replay.maxTick():
@@ -273,6 +292,8 @@ proc advance*(playback: var Playback, replay: Replay) =
   var steps = playback.speed()
   if playback.skipLulls and replay.isLullTick(playback.tick):
     steps *= 8
+  elif playback.speedIndex == ReplayHalfSpeedIndex:
+    steps = (if playback.halfPhase: 1 else: 0)
   playback.tick = min(playback.tick + steps, replay.maxTick())
 
 proc eventsAt*(replay: Replay, fromTick, toTick: int): JsonNode =
