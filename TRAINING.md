@@ -55,3 +55,18 @@ PufferLib, or `recipes.external.coworld_metta_rl.train` for Metta RL. Use
 `players=5`, `max_decisions=200`, a timestep limit, and one of the three
 variant IDs above. The bridge also publishes the hosted prompts as
 `messages` and `semantic_view`.
+
+## Local reinforcement learning proof
+
+Metta RL completed 512 timesteps on each certified variant through the
+numeric bridge. Native PufferLib trained 4,096 CUDA timesteps per variant,
+then reloaded checkpoints for four games on held-out seeds 101 and 102:
+
+| Variant | Seed 101 score / performance | Seed 102 score / performance | Checkpoint SHA-256 |
+| --- | --- | --- | --- |
+| hidden-agenda | 0 / 0.5 | 0.75 / 0.59375 | `38c0bc3d454f0b9a0fc4c1dac606546aa88bb972b5c6969bb5fb6ffab285a255` |
+| hidden-agenda-notalk | -0.5 / 0.4375 | 0.75 / 0.59375 | `a74c20942c29f869cfaba27a6449df20fb8e6c2966eda4baf269c254027cd9f2` |
+| hidden-agenda-blind | -0.333333 / 0.458333 | 0.285714 / 0.535714 | `7a924e7499fbbd436122817eeb450b29fef23a6b47248a31010f46e2183c6505` |
+
+These short pilots verify training, checkpoint reload, and evaluation. They do
+not establish competitive policies.
