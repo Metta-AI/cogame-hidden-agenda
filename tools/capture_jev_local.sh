@@ -56,5 +56,11 @@ summary = json.loads(Path(sys.argv[1]).read_text().splitlines()[-1])
 print(Path(summary['artifacts']) / 'replay.json')
 PY
 )
-python3 tools/verify_jev_capture.py "$artifact_dir/traces.jsonl" "$replay"
+python3 tools/verify_jev_capture.py "$artifact_dir/traces.jsonl" "$replay" \
+  --episodes-output "$artifact_dir/episodes.jsonl"
+PYTHONPATH="$METTA_REPO/packages/metta-posttrain/src:$METTA_REPO/packages/metta-training/src" \
+  "$METTA_PYTHON" -m metta_posttrain.cli systemone-candidates \
+  --traces "$artifact_dir/traces.jsonl" \
+  --episodes "$artifact_dir/episodes.jsonl" \
+  --output "$artifact_dir/candidates.jsonl"
 echo "capture_artifacts=$artifact_dir"

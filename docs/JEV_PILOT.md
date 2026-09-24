@@ -70,6 +70,16 @@ disagreements. OpenRouter returned **$0.000586992** in provider cost for
 trace file has mode `0600` inside a `0700` directory. These raw records are
 unreviewed research data, not approved training labels.
 
+The completed-episode projection passed `metta-posttrain systemone-candidates`:
+eight candidates, eight eligible, zero excluded, zero incomplete. A second
+captured crew seed 42 made ten calls for $0.000767256. One response's reported
+choice differed from its probability maximum. The game applied the maximum;
+the candidate projection excluded that inconsistent raw answer. The importer
+produced nine eligible candidates, one excluded call, and zero incomplete.
+Both capture directories retain private `traces.jsonl`, `episodes.jsonl`, and
+`candidates.jsonl` files with mode `0600`. None is a training label without
+separate review.
+
 Run the capture using a Metta checkout that exports `/v1/systemone` and a
 Python environment with its `metta-posttrain` dependencies:
 
@@ -82,8 +92,9 @@ OPENROUTER_API_KEY="$(aws secretsmanager get-secret-value --secret-id shared/ope
 
 The wrapper checks that the proxy exports `/v1/systemone` before starting the
 game, removes the upstream key from the game process, and runs
-`tools/verify_jev_capture.py` after the episode. It retains failed captures
-for inspection as well as successful ones.
+`tools/verify_jev_capture.py` after the episode. It then projects the verified
+episode into the existing System One candidate importer. It retains failed
+captures for inspection as well as successful ones.
 
 ## Integration proof
 
