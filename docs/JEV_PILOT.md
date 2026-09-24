@@ -1,5 +1,10 @@
 # Hidden Agenda Jev pilot, September 24, 2026
 
+These measurements describe the earlier game-hosted Jev implementation. They
+are historical and must not be treated as performance results for the current
+player-side Jev policy. The current policy uses the generic v2 observation and
+action protocol; a new paired evaluation is required before comparing scores.
+
 ## Scope
 
 `PLAYER_JEV=1` asks System One to rank complete, legal decisions at each
@@ -42,22 +47,16 @@ change shows model variability at a fixed game seed. Six pairs do not establish
 a gameplay gain or social-intelligence transfer. The chat variant can only
 reuse speech from scripted candidates; Jev does not generate new messages.
 
-Run both arms with the same seed and role:
+For current player-side paired episodes, run both arms with the same seed and
+role through the game server:
 
 ```bash
-nim c --hints:off tools/jev_local_eval.nim
-tools/jev_local_eval miner 7 crew
-TYPESAFE_API_KEY="$(aws secretsmanager get-secret-value --secret-id typesafe/api-key --query SecretString --output text)" \
-  env -u ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY_URI \
-  -u AWS_ENDPOINT_URL_BEDROCK_RUNTIME -u AWS_BEARER_TOKEN_BEDROCK \
-  -u METTA_CAPTURE_URL tools/jev_local_eval jev 7 crew
+bash tools/local_episode.sh miner 7 crew
+TYPESAFE_API_KEY=<approved-key> bash tools/local_episode.sh jev 7 crew
 ```
 
-The runner retains each result, replay, and summary under ignored
-`dist/jev-local/`. It uses unique directory names so reruns do not overwrite
-earlier evidence. `tools/local_episode.sh` runs the same policy through the
-real game server and five WebSocket player processes, retaining their logs in
-ignored `tmp/episode.*` directories.
+The runner uses the real game server and five WebSocket player processes. It
+retains results, replay, and player logs in ignored `tmp/episode.*` directories.
 
 ## Captured trace and action join
 
@@ -93,7 +92,7 @@ Python environment with its `metta-posttrain` dependencies:
 METTA_REPO=/path/to/jev-enabled/metta \
 METTA_PYTHON=/path/to/metta/.venv/bin/python \
 OPENROUTER_API_KEY="$(aws secretsmanager get-secret-value --secret-id shared/openrouter/agent-inference-api-key --query SecretString --output text)" \
-  bash tools/capture_jev_local.sh 7 crew
+  bash tools/capture_jev_local.sh 7 crew native
   # Add "native" as a third argument to test the game server and five players.
 ```
 

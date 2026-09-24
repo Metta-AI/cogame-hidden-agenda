@@ -1,10 +1,7 @@
 ## Hidden Agenda player: a policy selects prompt, Jev, or scripted decisions.
 ##
-## Forked from `cogame-bullwhip/src/bullwhip_player.nim`. The container is
-## deliberately thin: it connects, delivers its prompt (or its baseline name),
-## and thereafter only listens. Every decision is made inside the GAME
-## container, which is what makes one parallel batch per decision point
-## possible.
+## Prompt policies register with the game's Claude adapter. External policies
+## receive their seat-private observation and return an ordinary action.
 ##
 ## PLAYER_SCRIPTED=miner registers the seat as the built-in working baseline;
 ## PLAYER_SCRIPTED=lurker as the loud foil. The server plays those
@@ -16,6 +13,7 @@
 ## Set PLAYER_JEV=1 to rank bounded game actions with System One instead.
 
 import std/[json, options, os, unicode]
+import hidden_agenda/jev_policy
 import whisky
 
 const
@@ -42,7 +40,11 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  let jev = getEnv("PLAYER_JEV") == "1"
+  let jevRequested = getEnv("PLAYER_JEV") == "1"
+  let jev = jevRequested and (
+    getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
+    getEnv("METTA_CAPTURE_URL").strip().len > 0 or
+    getEnv("TYPESAFE_API_KEY").strip().len > 0)
   if prompt.strip().len == 0 and scripted.len == 0 and not jev:
     prompt = DefaultPrompt
   ## Rune boundaries, never bytes: this string is echoed into the game's own
@@ -51,8 +53,9 @@ when isMainModule:
     prompt = prompt.runeSubStr(0, MaxPromptChars)
 
   proc promptFrame(): string =
-    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted,
-      "jev": jev}
+    if jev: $ %*{"type": "register", "control": "external"}
+    else: $ %*{"type": "prompt", "prompt": prompt,
+      "scripted": (if jevRequested: "miner" else: scripted)}
 
   var socket: WebSocket = nil
   for attempt in 1 .. ConnectAttempts:
@@ -106,6 +109,11 @@ when isMainModule:
         socket.send(promptFrame())
       of "state":
         discard
+      of "observation":
+        if jev:
+          let action = chooseAction(payload["observation"])
+          socket.send($ %*{"type": "action", "id": payload["id"],
+            "action": action})
       of "final":
         echo "hidden-agenda player: final scores ", payload{"scores"}
         break

@@ -1,13 +1,13 @@
 # Wire formats
 
-## Player protocol — `hidden_agenda.player.v1`
+## Player protocol — `hidden_agenda.player.v2`
 
 JSON text frames over `WS /player?slot=N&token=T`.
 
 **game → player**
 
 ```json
-{"type":"welcome","protocol":"hidden_agenda.player.v1","slot":1,"role":"crew",
+{"type":"welcome","protocol":"hidden_agenda.player.v2","slot":1,"role":"crew",
  "name":"BLUE","variant":"hidden-agenda-notalk","chat":false,"maxTicks":3000,
  "depositTarget":32,"aliases":["RED","BLUE","GREEN","YELLOW","PINK"]}
 ```
@@ -31,13 +31,25 @@ platform gets them from `results.json`.
 **player → game**
 
 ```json
-{"type":"prompt","prompt":"<= 4000 chars","scripted":"miner|lurker|","jev":false}
+{"type":"prompt","prompt":"<= 4000 chars","scripted":"miner|lurker|"}
 ```
 
 sent immediately on connect and again after `welcome` (the re-send guards the
-slot-registration race). Any other frame is ignored with a log line.
-`jev:true` selects the bounded System One policy and leaves an unset prompt
-empty. `scripted` selects the named baseline instead.
+slot-registration race). `scripted` selects the named baseline.
+
+Any policy may instead register for seat-private observations and submit normal
+game actions:
+
+```json
+{"type":"register","control":"external"}
+{"type":"observation","id":3,"observation":{"type":"state","slot":1,"role":"crew"}}
+{"type":"action","id":3,"action":{"plan":[{"job":"guard"}],"vote":"skip"}}
+```
+
+The game sends `observation` only at a decision point for an active seat. The
+`id` pairs the action with that decision point. The game validates the action
+with the same plan and vote rules used for prompt policies. A missing action
+uses the miner baseline. The game owns results and replay for every policy.
 
 ## Routes
 

@@ -1,4 +1,4 @@
-## Model-backed decision making for Hidden Agenda: the per-seat observation,
+## Claude-backed decision making for Hidden Agenda: the per-seat observation,
 ## the prompts, the reply schema, and ONE parallel batch per decision point.
 ##
 ## Forked from `cogame-bullwhip/src/bullwhip/llm.nim`. Hidden Agenda is a
@@ -7,7 +7,7 @@
 ## seat's request goes out together in one `curly.makeRequests` batch. Seats are
 ## never queried sequentially; that is what blows the play budget.
 ##
-## Prompt-model credentials, in order of preference:
+## Credentials, in order of preference:
 ##   Bedrock sidecar / bearer token   - hosted pods
 ##   ANTHROPIC_API_KEY                - the key itself
 ##   ANTHROPIC_API_KEY_URI            - a URI holding the key
@@ -52,12 +52,6 @@ type
     bedrockModels: seq[string]
     bedrockModel: int
     bedrockToken: string
-    jevEndpoint*: string
-    jevKey: string
-    jevModel: string
-    jevTrajectoryId: string
-    jevInputTokens*: int
-    jevOutputTokens*: int
     model*: string
     maxOutputTokens*: int
     timeoutSeconds*: int
@@ -70,14 +64,13 @@ proc disabledLlmClient*(): LlmClient =
   LlmClient(transport: ltNone, disabled: true, maxOutputTokens: 900,
     timeoutSeconds: 14)
 
-proc stubbedLlmClient*(send: BatchSender, jevEndpoint: string): LlmClient =
+proc stubbedLlmClient*(send: BatchSender): LlmClient =
   ## A client whose batch transport is `send`. Nothing here opens a socket and
   ## `curl` is never touched, which is what lets tests/test_llm.nim drive
   ## `decideAll`'s retry batch, its 429 / 403 / junk-reply handling and its
   ## fallback recording. Production never calls this.
   LlmClient(transport: ltAnthropic, disabled: false, apiKey: "stub",
-    model: "stub", maxOutputTokens: 900, timeoutSeconds: 14,
-    jevEndpoint: jevEndpoint, jevModel: "stub-jev", sendBatch: send)
+    model: "stub", maxOutputTokens: 900, timeoutSeconds: 14, sendBatch: send)
 
 proc resolveApiKey(): string =
   result = getEnv("ANTHROPIC_API_KEY").strip()
@@ -124,23 +117,6 @@ proc newLlmClient*(config: GameConfig): LlmClient =
   )
   let bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let bedrockToken = getEnv("AWS_BEARER_TOKEN_BEDROCK").strip()
-  let captureUrl = getEnv("METTA_CAPTURE_URL").strip()
-  let typesafeKey = getEnv("TYPESAFE_API_KEY").strip()
-  if bedrockEndpoint.len > 0:
-    result.jevEndpoint = bedrockEndpoint.strip(chars = {'/'}, leading = false)
-    result.jevModel = "typesafe/jev-1.13"
-  elif captureUrl.len > 0:
-    result.jevEndpoint = captureUrl.strip(chars = {'/'}, leading = false)
-    result.jevKey = getEnv("METTA_CAPTURE_KEY").strip()
-    if result.jevKey.len == 0:
-      raise newException(HiddenAgendaError, "METTA_CAPTURE_KEY is required")
-    result.jevModel = "typesafe/jev-1.13"
-    result.jevTrajectoryId = "hidden-agenda-jev-" & $config.seed
-  elif typesafeKey.len > 0:
-    result.jevEndpoint = getEnv("TYPESAFE_BASE_URL",
-      "https://api.typesafe.ai").strip(chars = {'/'}, leading = false)
-    result.jevKey = typesafeKey
-    result.jevModel = getEnv("TYPESAFE_DEFAULT_MODEL", "jev-latest")
   if bedrockEndpoint.len > 0 or bedrockToken.len > 0:
     let region = getEnv("AWS_REGION", getEnv("AWS_DEFAULT_REGION", "us-west-2"))
     let endpoint =
@@ -161,11 +137,7 @@ proc newLlmClient*(config: GameConfig): LlmClient =
   else:
     result.transport = ltNone
     result.disabled = true
-    if result.jevEndpoint.len > 0:
-      result.curl = newCurly()
-      echo "hidden-agenda llm: Jev transport enabled; prompt seats scripted"
-    else:
-      echo "hidden-agenda llm: no LLM credentials; every seat plays scripted"
+    echo "hidden-agenda llm: no LLM credentials; every seat plays scripted"
 
 # ---------------------------------------------------------------------------
 # The observation. Every number here is visible to that seat; NOTHING else is.
@@ -719,78 +691,6 @@ proc parseReply*(sim: Sim, slot: int, payload: JsonNode): Decision =
 # Transport
 # ---------------------------------------------------------------------------
 
-proc jevCandidates*(sim: Sim, slot: int): seq[tuple[name: string,
-    decision: Decision]] =
-  let miner = scriptedDecision(sim, slot, skMiner, sim.inMeeting)
-  result.add(("miner", miner))
-  result.add(("lurker", scriptedDecision(sim, slot, skLurker,
-    sim.inMeeting)))
-  var guard = miner
-  guard.plan = @[PlanStep(job: jkGuard)]
-  result.add(("guard", guard))
-  if sim.inMeeting:
-    if miner.vote != "skip":
-      var skip = miner
-      skip.vote = "skip"
-      result.add(("vote_skip", skip))
-    for alias in Aliases:
-      if alias != Aliases[slot] and sim.isActiveAlias(alias) and
-          alias != miner.vote:
-        var vote = miner
-        vote.vote = alias
-        result.add(("vote_" & alias, vote))
-
-proc jevCriteria*(sim: Sim, slot: int): JsonNode =
-  result = newJObject()
-  for candidate in sim.jevCandidates(slot):
-    let action = candidate.decision
-    var description = "Plan " & $planJson(action.plan)
-    if sim.inMeeting:
-      description.add("; vote " & action.vote)
-    if action.switchIf.len > 0:
-      description.add("; conditional vote " & action.switchIf & " -> " &
-        action.switchTo)
-    if sim.config.chat and action.say.len > 0:
-      description.add("; say: " & action.say)
-    if action.notes.len > 0:
-      description.add("; private notes: " & action.notes)
-    result[candidate.name] = %description
-
-proc jevDecision*(sim: Sim, slot: int, payload, criteria: JsonNode): Decision =
-  let answer = payload["answers"]["decision"]
-  let probabilities = answer["probabilities"]
-  let reported = answer["choice"].getStr()
-  if answer["type"].getStr() != "choice" or
-      not criteria.hasKey(reported) or probabilities.len != criteria.len:
-    raise newException(HiddenAgendaError, "Jev returned the wrong choice set")
-  let confidence = answer["confidence"].getFloat()
-  if confidence < 0 or confidence > 1:
-    raise newException(HiddenAgendaError, "Jev confidence is outside [0, 1]")
-  var total = 0.0
-  var best = -1.0
-  var choice = ""
-  for name, probability in probabilities.pairs:
-    if not criteria.hasKey(name):
-      raise newException(HiddenAgendaError, "Jev returned an unknown choice")
-    let value = probability.getFloat()
-    if value < 0 or value > 1:
-      raise newException(HiddenAgendaError, "Jev probability is outside [0, 1]")
-    total += value
-    if value > best:
-      best = value
-      choice = name
-  if abs(total - 1) > probabilities.len.float * 0.005 + 1e-6:
-    raise newException(HiddenAgendaError, "Jev probabilities do not sum to one")
-  for candidate in sim.jevCandidates(slot):
-    if candidate.name == choice:
-      result = candidate.decision
-      result.source = dsJev
-      break
-  echo "hidden-agenda jev: choice ", choice, " reported ", reported,
-    " confidence ", confidence, " model ", payload{"model"}.getStr(),
-    " input_tokens ", payload["usage"]{"input_tokens"}.getInt(),
-    " output_tokens ", payload["usage"]{"output_tokens"}.getInt()
-
 proc requestFor(client: LlmClient, system, user: string):
     tuple[url: string, headers: HttpHeaders, body: string] =
   var body = %*{
@@ -853,7 +753,6 @@ proc decideAll*(
   seats: seq[int],
   prompts: seq[string],
   scriptedKinds: seq[ScriptKind],
-  jev: seq[bool],
   cause: string
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order. NEVER raises: any failure falls
@@ -866,59 +765,22 @@ proc decideAll*(
     if kind != skNone:
       result[index] = scriptedDecision(sim, seat, kind, sim.inMeeting)
       result[index].source = dsScripted
-    elif client == nil or (client.disabled and not jev[seat]) or
-        (jev[seat] and client.jevEndpoint.len == 0):
+    elif client == nil or client.disabled:
       result[index] = scriptedDecision(sim, seat, skMiner, sim.inMeeting)
       result[index].source = dsFallback
     else:
       open.add(index)
   for attempt in 0 .. 1:
-    if client.disabled:
-      var enabled: seq[int]
-      for index in open:
-        if jev[seats[index]]:
-          enabled.add(index)
-        else:
-          result[index] = scriptedDecision(sim, seats[index], skMiner,
-            sim.inMeeting)
-          result[index].source = dsFallback
-      open = enabled
-    if open.len == 0:
+    if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
     for index in open:
       let seat = seats[index]
-      if jev[seat]:
-        var headers: HttpHeaders
-        headers["content-type"] = "application/json"
-        if client.jevKey.len > 0:
-          headers["authorization"] = "Bearer " & client.jevKey
-        else:
-          headers["x-coworld-player-slot"] = $seat
-        if client.jevTrajectoryId.len > 0:
-          headers["x-metta-trajectory-id"] =
-            client.jevTrajectoryId & "-" & $seat
-        let body = %*{
-          "model": client.jevModel,
-          "state": $sim.seatView(seat, cause),
-          "questions": {"decision": {
-            "type": "choice",
-            "instructions": "Choose the complete plan and, at a meeting, vote " &
-              "that maximizes your team's chance of winning. Crew must " &
-              "deposit gems or eject the impostor. The impostor must " &
-              "avoid detection while stopping the crew. Judge only the " &
-              "information visible to this seat. " & prompts[seat],
-            "criteria": sim.jevCriteria(seat)
-          }}
-        }
-        batch.post(client.jevEndpoint & "/v1/systemone", headers, $body,
-          $index)
-      else:
-        var user = userPrompt(sim, seat, prompts[seat], cause)
-        if attempt > 0:
-          user.add(RetryHint)
-        let request = client.requestFor(systemPrompt(sim, seat), user)
-        batch.post(request.url, request.headers, request.body, $index)
+      var user = userPrompt(sim, seat, prompts[seat], cause)
+      if attempt > 0:
+        user.add(RetryHint)
+      let request = client.requestFor(systemPrompt(sim, seat), user)
+      batch.post(request.url, request.headers, request.body, $index)
     ## ONE parallel batch for every open seat. Never a loop of single calls.
     let started = epochTime()
     let responses =
@@ -931,25 +793,10 @@ proc decideAll*(
     for position, index in open:
       let seat = seats[index]
       try:
-        var decision: Decision
-        if jev[seat]:
-          let response = responses[position].response
-          let error = responses[position].error
-          if error.len > 0 or response.code < 200 or response.code >= 300:
-            raise newException(HiddenAgendaError, "Jev transport failed: " &
-              error & " HTTP " & $response.code)
-          let payload = parseJson(response.body)
-          decision = sim.jevDecision(seat, payload, sim.jevCriteria(seat))
-          client.jevInputTokens += payload["usage"]{"input_tokens"}.getInt()
-          client.jevOutputTokens += payload["usage"]{"output_tokens"}.getInt()
-        else:
-          let text = client.textOf(responses[position].response,
-            responses[position].error, batch[position].url)
-          decision = parseReply(sim, seat, extractJsonObject(text))
-        decision.source =
-          if attempt > 0: dsRetry
-          elif jev[seat]: dsJev
-          else: dsLlm
+        let text = client.textOf(responses[position].response,
+          responses[position].error, batch[position].url)
+        var decision = parseReply(sim, seat, extractJsonObject(text))
+        decision.source = if attempt == 0: dsLlm else: dsRetry
         decision.latencyMs = latency
         result[index] = decision
       except CatchableError as error:
@@ -974,7 +821,6 @@ type
     client*: LlmClient
     prompts*: seq[string]
     scriptedKinds*: seq[ScriptKind]
-    jev*: seq[bool]
     minBatchSeconds*: int
     maxBatches*: int
     batches*: int
@@ -988,14 +834,13 @@ type
     batchSizes*: seq[int]
 
 proc newDecisionDriver*(client: LlmClient, config: GameConfig,
-    prompts: seq[string], scriptedKinds: seq[ScriptKind], jev: seq[bool],
+    prompts: seq[string], scriptedKinds: seq[ScriptKind],
     clock: proc (): float {.closure.} = nil,
     sleeper: proc (seconds: float) {.closure.} = nil): DecisionDriver =
   DecisionDriver(
     client: client,
     prompts: prompts,
     scriptedKinds: scriptedKinds,
-    jev: jev,
     minBatchSeconds: config.minBatchSeconds,
     maxBatches: config.maxDecisionBatches,
     batches: 0,
@@ -1042,7 +887,7 @@ proc decide*(driver: DecisionDriver, sim: var Sim, seats: seq[int],
   driver.batches.inc
   driver.batchSizes.add(seats.len)
   result = decideAll(driver.client, sim, seats, driver.prompts,
-    driver.scriptedKinds, driver.jev, cause)
+    driver.scriptedKinds, cause)
   for index, seat in seats:
     driver.previous[seat] = result[index]
     driver.hasPrevious[seat] = true

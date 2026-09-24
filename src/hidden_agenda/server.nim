@@ -22,10 +22,9 @@
 ##                                    with a close, never a hang
 ##   WS  /global                      live spectator: the packet + chrome frame
 ##
-## Decisions are made HERE, not in the player container: the Bedrock sidecar
-## credentials and model secrets are injected into the GAME pod,
-## and "one parallel batch per decision point" is a game-server property
-## (hive, 2026-08-23).
+## Prompt decisions use the game-hosted Claude adapter. External policies
+## receive their private observation and return a normal action. The game
+## validates actions and owns rules, visibility, results, and replay.
 
 import std/[json, locks, os, sets, strutils, tables, times, unicode]
 import bitworld/runtime
@@ -47,7 +46,9 @@ type
   ServerState = object
     prompts: seq[string]
     scriptedKinds: seq[ScriptKind]
-    jev: seq[bool]
+    external: seq[bool]
+    decisionId: int
+    pendingActions: seq[JsonNode]
     registered: seq[bool]
     everRegistered: seq[bool]
     playerSockets: Table[int, WebSocket]
@@ -235,28 +236,67 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
-    var jev: seq[bool]
     withLock stateLock:
       prompts = shared.prompts
       kinds = shared.scriptedKinds
-      jev = shared.jev
     let client = newLlmClient(config)
     proc clock(): float {.closure.} = epochTime() - gameStart
     proc sleeper(seconds: float) {.closure.} =
       sleep(int(seconds * 1000.0))
-    let driver = newDecisionDriver(client, config, prompts, kinds, jev,
+    let driver = newDecisionDriver(client, config, prompts, kinds,
       clock, sleeper)
 
     proc decide(view: var Sim, seats: seq[int], cause: string):
         seq[Decision] {.closure.} =
+      var external: seq[bool]
+      var decisionId: int
+      var requestExternal = false
       withLock stateLock:
         pushStateFrames(cause)
         ## Re-read live: a seat whose socket died mid-episode has already been
         ## demoted to `miner` by the close handler.
         driver.prompts = shared.prompts
-        driver.scriptedKinds = shared.scriptedKinds
-        driver.jev = shared.jev
+        external = shared.external
+        driver.scriptedKinds = newSeq[ScriptKind](shared.seats)
+        for slot in 0 ..< shared.seats:
+          driver.scriptedKinds[slot] =
+            if external[slot]: skMiner else: shared.scriptedKinds[slot]
+        requestExternal = driver.batches < driver.maxBatches and
+          not driver.pastDeadline()
+        shared.pendingActions = newSeq[JsonNode](shared.seats)
+        if requestExternal:
+          inc shared.decisionId
+          decisionId = shared.decisionId
+          for seat in seats:
+            if external[seat] and shared.playerSockets.hasKey(seat):
+              shared.playerSockets[seat].send($ %*{
+                "type": "observation", "id": decisionId,
+                "observation": seatView(view, seat, cause)})
       result = driver.decide(view, seats, cause)
+      if requestExternal:
+        let started = epochTime()
+        let deadline = epochTime() + config.llmTimeoutSeconds.float
+        while epochTime() < deadline:
+          var ready = true
+          withLock stateLock:
+            for seat in seats:
+              if external[seat] and shared.playerSockets.hasKey(seat) and
+                  shared.pendingActions[seat].isNil:
+                ready = false
+          if ready:
+            break
+          sleep(20)
+        for index, seat in seats:
+          if external[seat]:
+            var action: JsonNode
+            withLock stateLock:
+              action = shared.pendingActions[seat]
+            if not action.isNil:
+              result[index] = view.parseReply(seat, action)
+              result[index].source = dsExternal
+              result[index].latencyMs = int((epochTime() - started) * 1000)
+              driver.previous[seat] = result[index]
+              driver.hasPrevious[seat] = true
 
     proc onTick(view: var Sim) {.closure.} =
       if view.tick mod 24 == 0 or view.done:
@@ -371,6 +411,22 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
         return
       try:
         let payload = parseJson(message.data)
+        if payload{"type"}.getStr() == "register":
+          if payload["control"].getStr() != "external":
+            raise newException(HiddenAgendaError, "unknown player control")
+          withLock stateLock:
+            shared.external[slot] = true
+            shared.registered[slot] = true
+            shared.everRegistered[slot] = true
+          return
+        if payload{"type"}.getStr() == "action":
+          withLock stateLock:
+            if shared.external[slot] and payload["id"].getInt() ==
+                shared.decisionId and shared.pendingActions[slot].isNil:
+              let action = payload["action"]
+              discard gameSim.parseReply(slot, action)
+              shared.pendingActions[slot] = action
+          return
         if payload{"type"}.getStr() != "prompt":
           echo "hidden-agenda: ignoring player frame of type '",
             payload{"type"}.getStr(), "'"
@@ -383,18 +439,16 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           if node == nil or node.kind == JNull: skNone
           elif node.kind == JBool: (if node.getBool(): skMiner else: skNone)
           else: parseScriptKind(node.getStr())
-        let jev = payload{"jev"}.getBool()
-        if prompt.strip().len == 0 and kind == skNone and not jev:
+        if prompt.strip().len == 0 and kind == skNone:
           kind = skMiner
         withLock stateLock:
           shared.prompts[slot] = prompt
           shared.scriptedKinds[slot] = kind
-          shared.jev[slot] = jev
+          shared.external[slot] = false
           shared.registered[slot] = true
           shared.everRegistered[slot] = true
         echo "hidden-agenda: slot ", slot, " registered (", prompt.len,
           " prompt chars", (if kind != skNone: ", scripted " & $kind
-            elif jev: ", jev"
             else: ", llm"), ")"
       except CatchableError as error:
         echo "hidden-agenda: ignoring bad player frame: ", error.msg
@@ -437,7 +491,8 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   shared.seats = config.numAgents
   shared.prompts = newSeq[string](shared.seats)
   shared.scriptedKinds = newSeq[ScriptKind](shared.seats)
-  shared.jev = newSeq[bool](shared.seats)
+  shared.external = newSeq[bool](shared.seats)
+  shared.pendingActions = newSeq[JsonNode](shared.seats)
   shared.registered = newSeq[bool](shared.seats)
   shared.everRegistered = newSeq[bool](shared.seats)
   shared.snapshot = globalSnapshot(gameSim)

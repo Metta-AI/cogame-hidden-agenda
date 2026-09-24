@@ -53,7 +53,7 @@ Full rules: [docs/RULES.md](docs/RULES.md). Wire formats:
 [docs/PROTOCOL.md](docs/PROTOCOL.md). Fielding a policy:
 [docs/POLICIES.md](docs/POLICIES.md).
 
-The [Jev pilot](docs/JEV_PILOT.md) records paired no-talk episodes, token
+The [historical Jev pilot](docs/JEV_PILOT.md) records paired no-talk episodes, token
 counts, and the local five-player smoke test.
 Post-training from native games: [TRAINING.md](TRAINING.md).
 

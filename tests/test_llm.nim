@@ -7,7 +7,7 @@
 import std/[json, strutils, unicode]
 import curly
 import support/helpers
-import hidden_agenda/[sim_types, station, sim_config, sim_state, sim, llm]
+import hidden_agenda/[sim_types, sim_config, sim_state, sim, llm]
 
 template check(condition: bool, message: string) =
   if not condition:
@@ -225,7 +225,7 @@ block oneBatchCarriesEveryEligibleSeat:
   proc sleeper(seconds: float) {.closure.} =
     slept += seconds
     now += seconds
-  let driver = newDecisionDriver(client, sim.config, prompts, kinds, newSeq[bool](Seats), clock,
+  let driver = newDecisionDriver(client, sim.config, prompts, kinds, clock,
     sleeper)
   var seats = sim.activeSeats()
   check(seats.len == Seats, "five seats at the opening")
@@ -256,7 +256,7 @@ block minBatchSecondsFloorsTheSpacing:
   var now = 0.0
   proc clock(): float {.closure.} = now
   proc sleeper(seconds: float) {.closure.} = now += seconds
-  let driver = newDecisionDriver(client, config, prompts, kinds, newSeq[bool](Seats), clock, sleeper)
+  let driver = newDecisionDriver(client, config, prompts, kinds, clock, sleeper)
   let seats = sim.activeSeats()
   discard driver.decide(sim, seats, "opening")
   let first = now
@@ -278,7 +278,7 @@ block maxDecisionBatchesCaps:
     kinds.add(skNone)
   proc clock(): float {.closure.} = 0.0
   proc sleeper(seconds: float) {.closure.} = discard
-  let driver = newDecisionDriver(client, config, prompts, kinds, newSeq[bool](Seats), clock, sleeper)
+  let driver = newDecisionDriver(client, config, prompts, kinds, clock, sleeper)
   let seats = sim.activeSeats()
   for round in 0 ..< 3:
     discard driver.decide(sim, seats, "meeting")
@@ -371,14 +371,14 @@ block theRetryBatchAndTheFallbackAreDriven:
           result.add((Response(), "connection timed out"))
         else:
           result.add((reply(good), ""))
-    let client = stubbedLlmClient(send, "")
+    let client = stubbedLlmClient(send)
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
     for _ in 0 ..< Seats:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, newSeq[bool](Seats), "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
     check(batches == 2, "a first-attempt failure issues exactly ONE more " &
       "batch, got " & $batches)
     check(sawHint, "and the retry batch carries the retry hint")
@@ -399,14 +399,14 @@ block theRetryBatchAndTheFallbackAreDriven:
       batches.inc
       for i in 0 ..< batch.len:
         result.add((Response(code: 429, body: "slow down"), ""))
-    let client = stubbedLlmClient(send, "")
+    let client = stubbedLlmClient(send)
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
     for _ in 0 ..< Seats:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, newSeq[bool](Seats), "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
     check(batches == 2, "a 429 is retried once and then given up on, got " &
       $batches & " batches")
     for decision in decisions:
@@ -424,19 +424,19 @@ block theRetryBatchAndTheFallbackAreDriven:
       batches.inc
       for i in 0 ..< batch.len:
         result.add((Response(code: 403, body: "no"), ""))
-    let client = stubbedLlmClient(send, "")
+    let client = stubbedLlmClient(send)
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
     for _ in 0 ..< Seats:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    var decisions = client.decideAll(sim, seats, prompts, kinds, newSeq[bool](Seats), "opening")
+    var decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
     check(batches == 1, "a 403 stops the ladder inside the first batch")
     check(client.disabled, "and disables the client")
     for decision in decisions:
       check(decision.source == dsFallback, "every seat falls back")
-    decisions = client.decideAll(sim, seats, prompts, kinds, newSeq[bool](Seats), "meeting")
+    decisions = client.decideAll(sim, seats, prompts, kinds, "meeting")
     check(batches == 1, "a disabled client never issues another batch")
     for decision in decisions:
       check(decision.source == dsFallback, "and every later seat is scripted")
@@ -450,14 +450,14 @@ block theRetryBatchAndTheFallbackAreDriven:
       batches.inc
       for i in 0 ..< batch.len:
         result.add((reply("I would rather not say."), ""))
-    let client = stubbedLlmClient(send, "")
+    let client = stubbedLlmClient(send)
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
     for _ in 0 ..< Seats:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, newSeq[bool](Seats), "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
     check(batches == 2, "junk is retried once")
     for decision in decisions:
       check(decision.source == dsFallback,
@@ -478,14 +478,14 @@ block theRetryBatchAndTheFallbackAreDriven:
           result.add((reply(good), ""))
         else:
           result.add((Response(), "connection reset"))
-    let client = stubbedLlmClient(send, "")
+    let client = stubbedLlmClient(send)
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
     for _ in 0 ..< Seats:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, newSeq[bool](Seats), "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
     check(sizes == @[Seats, Seats - 1],
       "the retry batch carries only the seats that failed, got " & $sizes)
     check(decisions[0].source == dsLlm,
@@ -494,51 +494,5 @@ block theRetryBatchAndTheFallbackAreDriven:
       check(decisions[index].source == dsRetry,
         "and the rest as retry")
 
-block jevSharesTheParallelDecisionBatch:
-  var sim = rig()
-  var batches = 0
-  proc send(batch: RequestBatch, timeoutSeconds: int):
-      ResponseBatch {.closure.} =
-    batches.inc
-    check(batch.len == 2, "Jev and prompt seats share one batch")
-    check(batch[0].url.endsWith("/v1/systemone"),
-      "Jev uses the System One endpoint")
-    check(batch[1].url.endsWith("/v1/messages"),
-      "the prompt seat keeps its Anthropic endpoint")
-    let jevRequest = parseJson(batch[0].body)
-    let criteria = jevRequest["questions"]["decision"]["criteria"]
-    check(criteria.hasKey("miner") and criteria.hasKey("guard"),
-      "Jev sees complete bounded plans")
-    check(parseJson(jevRequest["state"].getStr())["role"].getStr() ==
-      "crew",
-      "Jev receives its own role")
-    var probabilities = newJObject()
-    for name, _ in criteria.pairs:
-      probabilities[name] = %(if name == "guard": 1.0 else: 0.0)
-    result.add((Response(code: 200, body: $(%*{
-      "model": "stub-jev", "usage": {"input_tokens": 10,
-        "output_tokens": 2},
-      "answers": {"decision": {"type": "choice", "choice": "guard",
-        "confidence": 1.0, "probabilities": probabilities}}
-    })), ""))
-    result.add((Response(code: 200, body: $(%*{
-      "stop_reason": "end_turn",
-      "content": [{"type": "text",
-        "text": "{\"plan\":[{\"job\":\"guard\"}]}"}]
-    })), ""))
-  let client = stubbedLlmClient(send, "https://jev.example")
-  let seats = sim.activeSeats()
-  var prompts = newSeq[string](Seats)
-  var kinds = uniformKinds(skMiner)
-  var jev = newSeq[bool](Seats)
-  kinds[0] = skNone
-  kinds[1] = skNone
-  jev[0] = true
-  let decisions = client.decideAll(sim, seats, prompts, kinds, jev,
-    "opening")
-  check(batches == 1, "one parallel batch completes both model seats")
-  check(decisions[0].source == dsJev and
-    decisions[0].plan[0].job == jkGuard, "Jev selects the guard plan")
-  check(decisions[1].source == dsLlm, "prompt seat also resolves")
 
 echo "test_llm: ok"

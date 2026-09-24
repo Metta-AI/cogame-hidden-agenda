@@ -30,7 +30,7 @@ orders = {
     for event in replay["events"]
     if event["k"] == "order"
     and event["seat"] == args.seat
-    and event["source"] in ("jev", "retry")
+    and event["source"] == "external"
 }
 
 matched = set()
@@ -46,7 +46,7 @@ for trace_id, start in requests.items():
     assert end["status"] == 200, trace_id
     trajectories.add(start["trajectory_id"])
     request = start["request"]
-    state = json.loads(request["state"])
+    state = json.loads(request["state"].split("\n", 1)[1])
     assert state["slot"] == args.seat, trace_id
     assert "impostorSlot" not in state and "seed" not in state, trace_id
     decision = state["decision"]
@@ -66,51 +66,12 @@ for trace_id, start in requests.items():
     choice = max(probabilities, key=probabilities.get)
     reported_disagreements += choice != answer["choice"]
 
-    description = criteria[choice]
-    assert description.startswith("Plan ")
-    plan, offset = json.JSONDecoder().raw_decode(description[5:])
+    action = json.loads(criteria[choice])
     order = orders[decision]
-    assert order["plan"] == plan, decision
-    clauses = description[5 + offset :].split("; ")[1:]
-    fields = {}
-    for clause in clauses:
-        for prefix in ("vote ", "conditional vote ", "say: ",
-                       "private notes: "):
-            if clause.startswith(prefix):
-                fields[prefix.rstrip(" :")] = clause[len(prefix):]
-                break
-        else:
-            raise ValueError(f"Unknown choice clause: {clause}")
-    if "vote" in fields:
-        assert order["vote"] == fields["vote"], decision
-    else:
-        assert order["vote"] == "", decision
-    if "conditional vote" in fields:
-        condition, target = fields["conditional vote"].split(" -> ")
-        assert order["switch"] == {"if": condition, "to": target}, decision
-    else:
-        assert order["switch"] is None, decision
-    if "say" in fields:
-        assert order["say"] == fields["say"], decision
-    else:
-        assert order["say"] == "", decision
-    if "private notes" in fields:
-        assert order["notes"] == fields["private notes"], decision
-    else:
-        assert order["notes"] == "", decision
+    assert order["plan"] == action["plan"], decision
+    assert order["vote"] == action["vote"], decision
 
     if choice == answer["choice"]:
-        switch = None
-        if "conditional vote" in fields:
-            condition, target = fields["conditional vote"].split(" -> ")
-            switch = {"if": condition, "to": target}
-        action = {
-            "plan": plan,
-            "vote": fields["vote"] if "vote" in fields else "",
-            "switch": switch,
-            "say": fields["say"] if "say" in fields else "",
-            "notes": fields["private notes"] if "private notes" in fields else "",
-        }
         candidate_decisions.append((decision, trace_id, action))
 
     input_tokens += usage["input_tokens"]

@@ -14,7 +14,7 @@ const
     ## carries a freeze beam, meetings open on a 200-tick cadence and instantly
     ## on a witnessed freeze.
 
-  Protocol* = "hidden_agenda.player.v1"
+  Protocol* = "hidden_agenda.player.v2"
   ReplayProtocol* = "hidden_agenda.replay.v1"
   GameName* = "hidden_agenda"
 
@@ -96,7 +96,7 @@ type
     room*: string    ## room id, for `patrol` / `lurk`
 
   DecisionSource* = enum
-    dsLlm = "llm", dsJev = "jev", dsRetry = "retry",
+    dsLlm = "llm", dsExternal = "external", dsRetry = "retry",
     dsFallback = "fallback"
     dsScripted = "scripted", dsBudget = "budget"
 

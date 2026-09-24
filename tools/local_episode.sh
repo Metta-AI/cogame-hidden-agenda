@@ -24,6 +24,8 @@ Path(path).write_text(json.dumps({
     'variant': 'hidden-agenda-notalk',
     'impostorSlot': 0 if role == 'impostor' else 4,
     'chat': False, 'meetingTicks': 25, 'sayTick': -1,
+    'maxTicks': 100, 'maxDecisionBatches': 4,
+    'meetingCadenceTicks': 50,
     'revealTick': 5, 'switchTick': 18, 'resolveTick': 23,
     'minBatchSeconds': 0, 'player_connect_timeout_seconds': 10,
 }))
@@ -73,7 +75,8 @@ results = json.loads((path / 'results.json').read_text())
 replay = json.loads((path / 'replay.json').read_text())
 log = (path / 'game.log').read_text()
 usage = [tuple(map(int, match)) for match in re.findall(
-    r'input_tokens (\d+) output_tokens (\d+)', log)]
+    r'input_tokens (\d+) output_tokens (\d+)',
+    (path / 'player0.log').read_text())]
 orders = [event for event in replay['events']
           if event['k'] == 'order' and event['seat'] == 0]
 print(json.dumps({
@@ -82,6 +85,6 @@ print(json.dumps({
     'jev_calls': len(usage), 'input_tokens': sum(x[0] for x in usage),
     'output_tokens': sum(x[1] for x in usage),
     'seat0_fallbacks': sum(event['source'] == 'fallback' for event in orders),
-    'seat0_jev_orders': sum(event['source'] == 'jev' for event in orders),
+    'seat0_jev_orders': sum(event['source'] == 'external' for event in orders),
 }))
 PY

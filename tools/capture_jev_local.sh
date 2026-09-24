@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-seed=${1:?usage: capture_jev_local.sh seed crew|impostor [eval|native]}
+seed=${1:?usage: capture_jev_local.sh seed crew|impostor [native]}
 role=${2:?role required}
-runner=${3:-eval}
-case "$runner" in eval|native) ;; *) exit 2 ;; esac
+runner=${3:-native}
+case "$runner" in native) ;; *) exit 2 ;; esac
 : "${METTA_REPO:?Set METTA_REPO to a checkout with metta-posttrain installed}"
 : "${METTA_PYTHON:?Set METTA_PYTHON to a Python environment with metta-posttrain dependencies}"
 : "${OPENROUTER_API_KEY:?Set an approved OpenRouter inference key}"
@@ -42,20 +42,11 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-if [ "$runner" = eval ]; then
-  nim c --hints:off -o:tmp/bin/jev-local-eval tools/jev_local_eval.nim
-  env -u OPENROUTER_API_KEY -u TYPESAFE_API_KEY \
-    -u ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY_URI \
-    -u AWS_ENDPOINT_URL_BEDROCK_RUNTIME -u AWS_BEARER_TOKEN_BEDROCK \
-    tmp/bin/jev-local-eval jev "$seed" "$role" \
-    > "$artifact_dir/run.log"
-else
-  env -u OPENROUTER_API_KEY -u TYPESAFE_API_KEY \
-    -u ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY_URI \
-    -u AWS_ENDPOINT_URL_BEDROCK_RUNTIME -u AWS_BEARER_TOKEN_BEDROCK \
-    bash tools/local_episode.sh jev "$seed" "$role" \
-    > "$artifact_dir/run.log"
-fi
+env -u OPENROUTER_API_KEY -u TYPESAFE_API_KEY \
+  -u ANTHROPIC_API_KEY -u ANTHROPIC_API_KEY_URI \
+  -u AWS_ENDPOINT_URL_BEDROCK_RUNTIME -u AWS_BEARER_TOKEN_BEDROCK \
+  bash tools/local_episode.sh jev "$seed" "$role" \
+  > "$artifact_dir/run.log"
 
 replay=$(python3 - "$artifact_dir/run.log" <<'PY'
 import json

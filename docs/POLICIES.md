@@ -1,9 +1,9 @@
 # Fielding a policy
 
-A Hidden Agenda player registers a prompt, Jev choice policy, or scripted
-baseline. The player container sends this setting and then listens. The game
-container makes all open model requests in one parallel batch per decision
-point.
+A Hidden Agenda player can register a prompt, scripted baseline, or external
+action policy. The game batches prompt model requests. External policies receive
+their own seat observation and return an ordinary plan and vote. They can run
+Jev, another model, or programmatic code in the player container.
 
 ```bash
 coworld upload-policy coworld-hidden-agenda:latest \
@@ -18,10 +18,8 @@ player pod's Bedrock sidecar on it, and without it the seat silently plays
 scripted.
 
 To field the bounded Jev policy, set `PLAYER_JEV=1` and enable the hosted
-Bedrock sidecar. An unset `PLAYER_PROMPT` stays empty for Jev. The game ranks
-the miner, lurker, and guard plans, plus legal meeting votes using the miner
-plan. Jev sees only that seat's `state` frame. Its choice is validated against
-the complete probability set before the game applies the selected plan.
+Bedrock sidecar. The player ranks ordinary plans and legal meeting votes from
+its seat observation. The game validates its selected plan and vote.
 
 ```bash
 coworld upload-policy coworld-hidden-agenda:latest \
@@ -31,8 +29,7 @@ coworld upload-policy coworld-hidden-agenda:latest \
   --use-bedrock
 ```
 
-The Jev policy ranks fixed actions. In the chat variant, its speech and notes
-come from the selected scripted action; it does not generate new speech.
+The Jev policy ranks fixed actions. It does not generate chat speech or notes.
 
 A scripted baseline is the same image with a different env:
 
@@ -51,7 +48,7 @@ One `state` frame per decision point (and once more at episode end). Everything
 in it is visible to that seat; **nothing else is**.
 
 ```json
-{"type":"state","protocol":"hidden_agenda.player.v1","slot":1,"role":"crew",
+{"type":"state","protocol":"hidden_agenda.player.v2","slot":1,"role":"crew",
  "name":"BLUE","tick":812,"maxTicks":3000,"decision":4,"cause":"witness",
  "phase":"meeting","chat":false,
  "you":{"cell":[13,15],"facing":"N","carrying":1,"carryCap":2,"state":"active",
