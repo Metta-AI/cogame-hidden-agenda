@@ -1,34 +1,40 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode=${1:?usage: local_episode.sh miner|jev seed crew|impostor}
+mode=${1:?usage: local_episode.sh miner|jev seed crew|impostor [smoke|variant]}
 seed=${2:?seed required}
 role=${3:?role required}
+profile=${4:-smoke}
 port=${PORT:-18118}
 case "$mode" in miner|jev) ;; *) exit 2 ;; esac
 case "$role" in crew|impostor) ;; *) exit 2 ;; esac
+case "$profile" in smoke|variant) ;; *) exit 2 ;; esac
 
 mkdir -p tmp/bin
 episode_dir=$(mktemp -d tmp/episode.XXXXXX)
 episode_dir="$PWD/$episode_dir"
-python3 - "$seed" "$role" "$episode_dir/config.json" <<'PY'
+python3 - "$seed" "$role" "$profile" "$episode_dir/config.json" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-seed, role, path = sys.argv[1:]
-Path(path).write_text(json.dumps({
+seed, role, profile, path = sys.argv[1:]
+config = {
     'tokens': [f't{i}' for i in range(5)],
     'players': [{'name': f'P{i}'} for i in range(5)],
     'seed': int(seed),
     'variant': 'hidden-agenda-notalk',
     'impostorSlot': 0 if role == 'impostor' else 4,
     'chat': False, 'meetingTicks': 25, 'sayTick': -1,
-    'maxTicks': 100, 'maxDecisionBatches': 4,
-    'meetingCadenceTicks': 50,
     'revealTick': 5, 'switchTick': 18, 'resolveTick': 23,
     'minBatchSeconds': 0, 'player_connect_timeout_seconds': 10,
-}))
+}
+config.update({
+    'maxTicks': 100 if profile == 'smoke' else 3000,
+    'maxDecisionBatches': 4 if profile == 'smoke' else 20,
+    'meetingCadenceTicks': 50 if profile == 'smoke' else 200,
+})
+Path(path).write_text(json.dumps(config))
 PY
 nim c --hints:off -o:tmp/bin/hidden-agenda src/hidden_agenda.nim
 nim c --hints:off -o:tmp/bin/hidden-agenda-player src/hidden_agenda_player.nim

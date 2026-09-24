@@ -5,18 +5,52 @@ import curly
 
 proc chooseAction*(observation: JsonNode): JsonNode =
   let meeting = observation["phase"].getStr() == "meeting"
+  let role = observation["role"].getStr()
   var actions = newJObject()
   let vote = if meeting: "skip" else: ""
-  actions["guard"] = %*{"plan": [{"job": "guard"}], "vote": vote}
+  var productivePlan = newJArray()
   let seams = observation["station"]["seams"]
-  if seams.len > 0:
-    actions["mine"] = %*{"plan": [{"job": "mine",
-      "at": seams[0]["id"].getStr()}], "vote": vote}
+  if role == "crew":
+    if observation["you"]["carrying"].getInt() > 0:
+      productivePlan.add(%*{"job": "deposit"})
+    if seams.len > 0:
+      let here = observation["you"]["cell"]
+      var bestDistance = high(int)
+      var bestSeam = ""
+      for seam in seams:
+        let cell = seam["cell"]
+        var distance = abs(here[0].getInt() - cell[0].getInt()) +
+          abs(here[1].getInt() - cell[1].getInt())
+        for seen in observation["seamsSeen"]:
+          if seen["id"].getStr() == seam["id"].getStr() and
+              seen["gems"].getInt() == 0:
+            distance += 40
+        if distance < bestDistance:
+          bestDistance = distance
+          bestSeam = seam["id"].getStr()
+      productivePlan.add(%*{"job": "mine", "at": bestSeam})
+      if observation["you"]["carrying"].getInt() == 0:
+        productivePlan.add(%*{"job": "deposit"})
+  else:
+    for cog in observation["roster"]:
+      let alias = cog["alias"].getStr()
+      if alias != observation["name"].getStr() and
+          cog["state"].getStr() == "active":
+        let hunt = %*{"job": "hunt", "who": alias}
+        let strike = %*{"job": "strike", "who": alias}
+        actions["hunt_" & alias] = %*{"plan": [hunt], "vote": vote}
+        actions["strike_" & alias] = %*{"plan": [strike], "vote": vote}
+        if productivePlan.len == 0:
+          productivePlan.add(hunt)
+  if productivePlan.len == 0:
+    productivePlan.add(%*{"job": "guard"})
+  actions["advance"] = %*{"plan": productivePlan, "vote": vote}
+  actions["guard"] = %*{"plan": [{"job": "guard"}], "vote": vote}
   let rooms = observation["station"]["rooms"]
   if rooms.len > 0:
     actions["patrol"] = %*{"plan": [{"job": "patrol",
       "room": rooms[0].getStr()}], "vote": vote}
-    if observation["role"].getStr() == "impostor":
+    if role == "impostor":
       actions["lurk"] = %*{"plan": [{"job": "lurk",
         "room": rooms[0].getStr()}], "vote": vote}
   if meeting:
@@ -25,11 +59,20 @@ proc chooseAction*(observation: JsonNode): JsonNode =
       if alias != observation["name"].getStr() and
           cog["state"].getStr() == "active":
         actions["vote_" & alias] = %*{
-          "plan": [{"job": "guard"}], "vote": alias}
+          "plan": productivePlan, "vote": alias}
 
   var criteria = newJObject()
   for name, action in actions.pairs:
-    criteria[name] = %($action)
+    let consequence =
+      if name.startsWith("hunt_"):
+        "Pursue and freeze only without a third cog watching. "
+      elif name.startsWith("strike_"):
+        "Pursue and freeze even if witnessed; a witness may get you ejected. "
+      elif name == "advance" and role == "crew":
+        "Mine and deposit gems to advance the crew win counter. "
+      else:
+        ""
+    criteria[name] = %(consequence & name & ": " & $action)
   let sidecar = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
   let capture = getEnv("METTA_CAPTURE_URL").strip()
   var endpoint: string
@@ -58,8 +101,15 @@ proc chooseAction*(observation: JsonNode): JsonNode =
     headers["x-coworld-player-slot"] = $observation["slot"].getInt()
   let body = %*{
     "model": model,
-    "state": "You are playing Hidden Agenda. Advance your own role's " &
-      "score. This seat-private observation is all you may use:\n" &
+    "state": "You are playing Hidden Agenda. Crew win by depositing " &
+      "enough gems or ejecting the impostor. Mining without depositing " &
+      "does not advance the crew counter. The impostor wins by freezing " &
+      "crew until only one remains; fake deposits never score. " &
+      "A witnessed freeze triggers an immediate meeting and may get the " &
+      "impostor ejected; hunting waits for an unwitnessed freeze. " &
+      "During meetings, votes are simultaneous, and a tie or skip majority " &
+      "ejects nobody. Advance your own role's score. This seat-private " &
+      "observation is all you may use:\n" &
       $observation,
     "questions": {"decision": {
       "type": "choice",

@@ -1,9 +1,43 @@
 # Hidden Agenda Jev pilot, September 24, 2026
 
-These measurements describe the earlier game-hosted Jev implementation. They
-are historical and must not be treated as performance results for the current
-player-side Jev policy. The current policy uses the generic v2 observation and
-action protocol; a new paired evaluation is required before comparing scores.
+The current Jev policy uses the generic v2 observation and action protocol.
+The game owns seat visibility, legal actions, scoring, and replay. The policy
+owns the candidate menu, prompt, and model call. No production version was
+published for this correction.
+
+## Current player-side paired episodes
+
+The native runner used the normal 3,000-tick no-talk variant, with seat 0
+playing Jev or miner against four miner policies. Both arms used the same seed
+and role on the same game source. The final Jev policy offers productive
+mine/deposit plans to crew and stealth hunts to the impostor.
+
+| Role / seed | Miner score | Jev score | Jev calls |
+| --- | ---: | ---: | ---: |
+| Crew / 7 | -1 | -1 | 5 |
+| Crew / 42 | 1 | 1 | 10 |
+| Crew / 1234 | 1 | -1 | 8 |
+| Impostor / 7 | 4 | 4 | 9 |
+| Impostor / 42 | -4 | 4 | 7 |
+| Impostor / 1234 | 4 | 4 | 8 |
+
+All 47 Jev calls produced accepted actions with zero fallback. They used
+93,365 input and 4,794 output tokens. At the OpenRouter Jev list rate of
+$0.042 per million input tokens, this is about $0.00392 in proxy model spend;
+direct TypeSafe usage was not invoiced here. Three seeds per role cannot
+establish a general performance gain. The final policy code needs a fresh
+normal certification run before merge; certification passed on the previous
+player-side policy commit.
+
+Run a matched native episode with `variant` to use the normal game duration:
+
+```bash
+bash tools/local_episode.sh miner 7 crew variant
+TYPESAFE_API_KEY=<approved-key> bash tools/local_episode.sh jev 7 crew variant
+```
+
+The sections below document the earlier game-hosted Jev implementation and
+are historical. Their scores must not be attributed to the current policy.
 
 ## Scope
 
