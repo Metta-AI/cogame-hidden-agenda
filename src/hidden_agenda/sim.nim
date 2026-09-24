@@ -675,14 +675,24 @@ proc runDecisionPoint*(sim: var Sim, decide: Decider, cause: string) =
 # Episode driver
 # ---------------------------------------------------------------------------
 
-proc runEpisode*(sim: var Sim, decide: Decider, now: Clock = nil,
-    deadlineSeconds = 0.0, onTick: proc (sim: var Sim) {.closure.} = nil) =
-  ## Drives the episode to an end condition. `decide` is called at most once per
-  ## decision point, with every ACTIVE seat in ONE call, so a
-  ## simultaneous-decision game can batch them.
+proc startEpisode*(sim: var Sim) =
   sim.tick = 0
   sim.recordFrame()
-  sim.runDecisionPoint(decide, "opening")
+
+proc advanceEpisode*(sim: var Sim, now: Clock = nil,
+    deadlineSeconds = 0.0, onTick: proc (sim: var Sim) {.closure.} = nil):
+    string =
+  ## Continue until the next simultaneous decision or the terminal state.
+  ## A newly opened meeting pauses before its first tick, so policies observe
+  ## the same meeting state as the hosted episode driver.
+  if sim.pendingMeetingTick:
+    sim.pendingMeetingTick = false
+    sim.meetingTick()
+    sim.recordFrame()
+    if onTick != nil:
+      onTick(sim)
+    if sim.tick >= sim.config.maxTicks and not sim.done:
+      sim.settle("complete", "timeout", "none")
   while not sim.done:
     if now != nil and deadlineSeconds > 0.0 and now() > deadlineSeconds:
       sim.endEarly()
@@ -694,7 +704,8 @@ proc runEpisode*(sim: var Sim, decide: Decider, now: Clock = nil,
         sim.endEarly()
         sim.recordFrame()
         break
-      sim.runDecisionPoint(decide, "meeting")
+      sim.pendingMeetingTick = true
+      return "meeting"
     elif sim.inMeeting and
         sim.tick - sim.meetingOpenTick >= sim.config.meetingTicks:
       sim.closeMeeting()
@@ -707,6 +718,18 @@ proc runEpisode*(sim: var Sim, decide: Decider, now: Clock = nil,
       onTick(sim)
     if sim.tick >= sim.config.maxTicks and not sim.done:
       sim.settle("complete", "timeout", "none")
+
+proc runEpisode*(sim: var Sim, decide: Decider, now: Clock = nil,
+    deadlineSeconds = 0.0, onTick: proc (sim: var Sim) {.closure.} = nil) =
+  ## Drives the episode to an end condition. `decide` is called at most once per
+  ## decision point, with every ACTIVE seat in ONE call, so a
+  ## simultaneous-decision game can batch them.
+  sim.startEpisode()
+  sim.runDecisionPoint(decide, "opening")
+  while not sim.done:
+    let cause = sim.advanceEpisode(now, deadlineSeconds, onTick)
+    if cause.len > 0:
+      sim.runDecisionPoint(decide, cause)
 
 proc finalise*(sim: var Sim) =
   ## The terminal `end` row, written once the episode has settled.

@@ -41,6 +41,7 @@ type
     meetingOpenTick*: int
     meetingPhase*: MeetingPhase
     inMeeting*: bool
+    pendingMeetingTick*: bool
     votes*: array[Seats, string]
     switchIf*: array[Seats, string]
     switchTo*: array[Seats, string]

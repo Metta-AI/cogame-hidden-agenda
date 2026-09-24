@@ -33,4 +33,25 @@ uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
 The native prompt includes the acting seat's role and limited vision. It
 does not reveal another seat's role. The exporter preserves arbitrary valid
 plans, meeting votes, private notes, and speech where the variant allows it.
-Numeric Metta RL and PufferLib still need a codec for those decisions.
+
+## Numeric reinforcement learning
+
+`tools/train_bridge.nim` exposes 74 numeric values from the acting seat's
+role, position, memory, and public state. It does not read other seats' roles
+or private memories. One action head chooses the shipped miner or lurker
+strategy; a second chooses a legal meeting vote. The bridge collects all
+active seats' choices against one pre-decision state, then advances the
+production simulator to the next opening or meeting. The text exporter above
+retains the full plan and speech vocabulary.
+
+```sh
+nim c -d:release --path:src -o:/tmp/hidden-agenda-train-bridge tools/train_bridge.nim
+python3 tools/test_train_bridge.py /tmp/hidden-agenda-train-bridge
+```
+
+From a Metta checkout with the Coworld training stack, pass the absolute
+bridge and manifest paths to `recipes.external.coworld.train` for native
+PufferLib, or `recipes.external.coworld_metta_rl.train` for Metta RL. Use
+`players=5`, `max_decisions=200`, a timestep limit, and one of the three
+variant IDs above. The bridge also publishes the hosted prompts as
+`messages` and `semantic_view`.
