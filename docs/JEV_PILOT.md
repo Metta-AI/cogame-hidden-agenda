@@ -59,6 +59,32 @@ earlier evidence. `tools/local_episode.sh` runs the same policy through the
 real game server and five WebSocket player processes, retaining their logs in
 ignored `tmp/episode.*` directories.
 
+## Captured trace and action join
+
+A separate crew seed 7 run used the OpenRouter capture proxy. It retained 16
+JSONL lines: eight requests and eight responses. The verifier matched each
+response's probability maximum to seat 0's applied plan and vote in the replay.
+All eight HTTP responses succeeded, with zero fallback and zero reported-choice
+disagreements. OpenRouter returned **$0.000586992** in provider cost for
+13,976 input and 564 output tokens. Mean proxy latency was 205.5 ms. The
+trace file has mode `0600` inside a `0700` directory. These raw records are
+unreviewed research data, not approved training labels.
+
+Run the capture using a Metta checkout that exports `/v1/systemone` and a
+Python environment with its `metta-posttrain` dependencies:
+
+```bash
+METTA_REPO=/path/to/jev-enabled/metta \
+METTA_PYTHON=/path/to/metta/.venv/bin/python \
+OPENROUTER_API_KEY="$(aws secretsmanager get-secret-value --secret-id shared/openrouter/agent-inference-api-key --query SecretString --output text)" \
+  bash tools/capture_jev_local.sh 7 crew
+```
+
+The wrapper checks that the proxy exports `/v1/systemone` before starting the
+game, removes the upstream key from the game process, and runs
+`tools/verify_jev_capture.py` after the episode. It retains failed captures
+for inspection as well as successful ones.
+
 ## Integration proof
 
 `nim c -r --hints:off tests/test_llm.nim` passed, including a mixed Jev and
