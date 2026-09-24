@@ -52,6 +52,7 @@ Crew jobs: `mine at:<seam>` `deposit` `watch who:<alias>` `patrol room:<room>`
 Full rules: [docs/RULES.md](docs/RULES.md). Wire formats:
 [docs/PROTOCOL.md](docs/PROTOCOL.md). Fielding a policy:
 [docs/POLICIES.md](docs/POLICIES.md).
+Post-training from native games: [TRAINING.md](TRAINING.md).
 
 ## Layout
 
