@@ -25,9 +25,17 @@ All 47 Jev calls produced accepted actions with zero fallback. They used
 93,365 input and 4,794 output tokens. At the OpenRouter Jev list rate of
 $0.042 per million input tokens, this is about $0.00392 in proxy model spend;
 direct TypeSafe usage was not invoiced here. Three seeds per role cannot
-establish a general performance gain. The final policy code needs a fresh
-normal certification run before merge; certification passed on the previous
-player-side policy commit.
+establish a general performance gain. At `0c0d85d`, the normal five-player
+fixture passed all ten local Coworld certification checks with the release
+workflow's `coworld[auth]==0.1.43` pin. The smoke episode started every
+declared player and produced conforming results and replay. This fixture
+uses the normal non-Jev roster; the paired episodes above exercise Jev and
+miner on the same game source. No hosted version was published.
+
+```bash
+uvx --from 'coworld[auth]==0.1.43' coworld build --version 0.1.1 --project . --compose compose.yaml --template coworld_manifest_template.json --output dist/coworld_manifest.json
+uvx --from 'coworld[auth]==0.1.43' coworld certify dist/coworld_manifest.json --no-open-report
+```
 
 Run a matched native episode with `variant` to use the normal game duration:
 
