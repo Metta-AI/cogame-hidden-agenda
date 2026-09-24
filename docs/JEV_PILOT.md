@@ -80,6 +80,12 @@ Both capture directories retain private `traces.jsonl`, `episodes.jsonl`, and
 `candidates.jsonl` files with mode `0600`. None is a training label without
 separate review.
 
+The same wrapper also ran the real five-player WebSocket path for crew seed 42.
+That native episode won, made nine Jev calls with zero fallback, and joined all
+nine captured responses to nine applied replay orders. OpenRouter reported
+$0.000675906 for 16,093 input and 630 output tokens. The importer produced
+nine eligible review candidates with zero excluded or incomplete calls.
+
 Run the capture using a Metta checkout that exports `/v1/systemone` and a
 Python environment with its `metta-posttrain` dependencies:
 
@@ -88,6 +94,7 @@ METTA_REPO=/path/to/jev-enabled/metta \
 METTA_PYTHON=/path/to/metta/.venv/bin/python \
 OPENROUTER_API_KEY="$(aws secretsmanager get-secret-value --secret-id shared/openrouter/agent-inference-api-key --query SecretString --output text)" \
   bash tools/capture_jev_local.sh 7 crew
+  # Add "native" as a third argument to test the game server and five players.
 ```
 
 The wrapper checks that the proxy exports `/v1/systemone` before starting the
