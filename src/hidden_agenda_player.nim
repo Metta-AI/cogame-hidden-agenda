@@ -1,4 +1,4 @@
-## Hidden Agenda player: a policy is just a prompt.
+## Hidden Agenda player: a policy selects prompt, Jev, or scripted decisions.
 ##
 ## Forked from `cogame-bullwhip/src/bullwhip_player.nim`. The container is
 ## deliberately thin: it connects, delivers its prompt (or its baseline name),
@@ -13,8 +13,9 @@
 ## To field your own policy, reuse this image and set PLAYER_PROMPT:
 ##   coworld upload-policy <hidden-agenda-image> --name my-hidden-agenda \
 ##     --run /bin/hidden-agenda-player --secret-env PLAYER_PROMPT="<strategy>"
+## Set PLAYER_JEV=1 to rank bounded game actions with System One instead.
 
-import std/[json, options, os, strutils, unicode]
+import std/[json, options, os, unicode]
 import whisky
 
 const
@@ -41,7 +42,8 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   var prompt = getEnv("PLAYER_PROMPT")
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  if prompt.strip().len == 0 and scripted.len == 0:
+  let jev = getEnv("PLAYER_JEV") == "1"
+  if prompt.strip().len == 0 and scripted.len == 0 and not jev:
     prompt = DefaultPrompt
   ## Rune boundaries, never bytes: this string is echoed into the game's own
   ## logs and a byte cut puts invalid UTF-8 on the wire.
@@ -49,7 +51,8 @@ when isMainModule:
     prompt = prompt.runeSubStr(0, MaxPromptChars)
 
   proc promptFrame(): string =
-    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted,
+      "jev": jev}
 
   var socket: WebSocket = nil
   for attempt in 1 .. ConnectAttempts:
@@ -68,7 +71,9 @@ when isMainModule:
 
   socket.send(promptFrame())
   echo "hidden-agenda player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ", llm"), ")"
+    (if scripted.len > 0: ", scripted " & scripted
+      elif jev: ", jev"
+      else: ", llm"), ")"
 
   while true:
     ## whisky RAISES rather than returning none on both a close frame and a

@@ -23,7 +23,7 @@
 ##   WS  /global                      live spectator: the packet + chrome frame
 ##
 ## Decisions are made HERE, not in the player container: the Bedrock sidecar
-## credentials and the anthropic_api_key secret are injected into the GAME pod,
+## credentials and model secrets are injected into the GAME pod,
 ## and "one parallel batch per decision point" is a game-server property
 ## (hive, 2026-08-23).
 
@@ -47,6 +47,7 @@ type
   ServerState = object
     prompts: seq[string]
     scriptedKinds: seq[ScriptKind]
+    jev: seq[bool]
     registered: seq[bool]
     everRegistered: seq[bool]
     playerSockets: Table[int, WebSocket]
@@ -234,14 +235,16 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
     var prompts: seq[string]
     var kinds: seq[ScriptKind]
+    var jev: seq[bool]
     withLock stateLock:
       prompts = shared.prompts
       kinds = shared.scriptedKinds
+      jev = shared.jev
     let client = newLlmClient(config)
     proc clock(): float {.closure.} = epochTime() - gameStart
     proc sleeper(seconds: float) {.closure.} =
       sleep(int(seconds * 1000.0))
-    let driver = newDecisionDriver(client, config, prompts, kinds,
+    let driver = newDecisionDriver(client, config, prompts, kinds, jev,
       clock, sleeper)
 
     proc decide(view: var Sim, seats: seq[int], cause: string):
@@ -252,6 +255,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         ## demoted to `miner` by the close handler.
         driver.prompts = shared.prompts
         driver.scriptedKinds = shared.scriptedKinds
+        driver.jev = shared.jev
       result = driver.decide(view, seats, cause)
 
     proc onTick(view: var Sim) {.closure.} =
@@ -379,15 +383,18 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           if node == nil or node.kind == JNull: skNone
           elif node.kind == JBool: (if node.getBool(): skMiner else: skNone)
           else: parseScriptKind(node.getStr())
-        if prompt.strip().len == 0 and kind == skNone:
+        let jev = payload{"jev"}.getBool()
+        if prompt.strip().len == 0 and kind == skNone and not jev:
           kind = skMiner
         withLock stateLock:
           shared.prompts[slot] = prompt
           shared.scriptedKinds[slot] = kind
+          shared.jev[slot] = jev
           shared.registered[slot] = true
           shared.everRegistered[slot] = true
         echo "hidden-agenda: slot ", slot, " registered (", prompt.len,
           " prompt chars", (if kind != skNone: ", scripted " & $kind
+            elif jev: ", jev"
             else: ", llm"), ")"
       except CatchableError as error:
         echo "hidden-agenda: ignoring bad player frame: ", error.msg
@@ -430,6 +437,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   shared.seats = config.numAgents
   shared.prompts = newSeq[string](shared.seats)
   shared.scriptedKinds = newSeq[ScriptKind](shared.seats)
+  shared.jev = newSeq[bool](shared.seats)
   shared.registered = newSeq[bool](shared.seats)
   shared.everRegistered = newSeq[bool](shared.seats)
   shared.snapshot = globalSnapshot(gameSim)

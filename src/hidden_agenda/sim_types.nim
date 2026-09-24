@@ -96,7 +96,8 @@ type
     room*: string    ## room id, for `patrol` / `lurk`
 
   DecisionSource* = enum
-    dsLlm = "llm", dsRetry = "retry", dsFallback = "fallback"
+    dsLlm = "llm", dsJev = "jev", dsRetry = "retry",
+    dsFallback = "fallback"
     dsScripted = "scripted", dsBudget = "budget"
 
   Decision* = object

@@ -1,9 +1,9 @@
 # Fielding a policy
 
-A Hidden Agenda policy **is a prompt**. The player container is thin: it
-connects, sends its prompt once, and then only listens. Every decision is made
-inside the game container, which is what lets all five seats be asked in ONE
-parallel batch at each decision point.
+A Hidden Agenda player registers a prompt, Jev choice policy, or scripted
+baseline. The player container sends this setting and then listens. The game
+container makes all open model requests in one parallel batch per decision
+point.
 
 ```bash
 coworld upload-policy coworld-hidden-agenda:latest \
@@ -17,6 +17,23 @@ coworld upload-policy coworld-hidden-agenda:latest \
 player pod's Bedrock sidecar on it, and without it the seat silently plays
 scripted.
 
+To field the bounded Jev policy, set `PLAYER_JEV=1` and enable the hosted
+Bedrock sidecar. An unset `PLAYER_PROMPT` stays empty for Jev. The game ranks
+the miner, lurker, and guard plans, plus legal meeting votes using the miner
+plan. Jev sees only that seat's `state` frame. Its choice is validated against
+the complete probability set before the game applies the selected plan.
+
+```bash
+coworld upload-policy coworld-hidden-agenda:latest \
+  --name my-hidden-agenda-jev \
+  --run /bin/hidden-agenda-player \
+  --secret-env PLAYER_JEV=1 \
+  --use-bedrock
+```
+
+The Jev policy ranks fixed actions. In the chat variant, its speech and notes
+come from the selected scripted action; it does not generate new speech.
+
 A scripted baseline is the same image with a different env:
 
 ```bash
@@ -24,10 +41,9 @@ A scripted baseline is the same image with a different env:
 --secret-env PLAYER_SCRIPTED=lurker    # the loud foil
 ```
 
-**Write for BOTH roles.** The impostor slot is redrawn from the seed every
-episode, so a policy is seated as crew four times in five and as the impostor
-once. A prompt that only says what to do as crew throws away a fifth of its
-score.
+**Write custom prompts for BOTH roles.** The impostor slot is redrawn from the
+seed every episode. A policy is seated as crew four times in five and as the
+impostor once. A prompt for crew alone throws away a fifth of its score.
 
 ## What your seat sees
 

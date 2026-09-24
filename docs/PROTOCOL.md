@@ -31,11 +31,13 @@ platform gets them from `results.json`.
 **player → game**
 
 ```json
-{"type":"prompt","prompt":"<= 4000 chars","scripted":"miner|lurker|"}
+{"type":"prompt","prompt":"<= 4000 chars","scripted":"miner|lurker|","jev":false}
 ```
 
 sent immediately on connect and again after `welcome` (the re-send guards the
 slot-registration race). Any other frame is ignored with a log line.
+`jev:true` selects the bounded System One policy and leaves an unset prompt
+empty. `scripted` selects the named baseline instead.
 
 ## Routes
 
