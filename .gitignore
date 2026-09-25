@@ -3,6 +3,7 @@ nimcache/
 *.exe
 *.out
 dist/
+tmp/
 replay-viewer/dist/
 __pycache__/
 *.pyc

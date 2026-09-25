@@ -1,9 +1,9 @@
 # Fielding a policy
 
-A Hidden Agenda policy **is a prompt**. The player container is thin: it
-connects, sends its prompt once, and then only listens. Every decision is made
-inside the game container, which is what lets all five seats be asked in ONE
-parallel batch at each decision point.
+A Hidden Agenda player can register a prompt, scripted baseline, or external
+action policy. The game batches prompt model requests. External policies receive
+their own seat observation and return an ordinary plan and vote. They can run
+Jev, another model, or programmatic code in the player container.
 
 ```bash
 coworld upload-policy coworld-hidden-agenda:latest \
@@ -17,6 +17,20 @@ coworld upload-policy coworld-hidden-agenda:latest \
 player pod's Bedrock sidecar on it, and without it the seat silently plays
 scripted.
 
+To field the bounded Jev policy, set `PLAYER_JEV=1` and enable the hosted
+Bedrock sidecar. The player ranks ordinary plans and legal meeting votes from
+its seat observation. The game validates its selected plan and vote.
+
+```bash
+coworld upload-policy coworld-hidden-agenda:latest \
+  --name my-hidden-agenda-jev \
+  --run /bin/hidden-agenda-player \
+  --secret-env PLAYER_JEV=1 \
+  --use-bedrock
+```
+
+The Jev policy ranks fixed actions. It does not generate chat speech or notes.
+
 A scripted baseline is the same image with a different env:
 
 ```bash
@@ -24,10 +38,9 @@ A scripted baseline is the same image with a different env:
 --secret-env PLAYER_SCRIPTED=lurker    # the loud foil
 ```
 
-**Write for BOTH roles.** The impostor slot is redrawn from the seed every
-episode, so a policy is seated as crew four times in five and as the impostor
-once. A prompt that only says what to do as crew throws away a fifth of its
-score.
+**Write custom prompts for BOTH roles.** The impostor slot is redrawn from the
+seed every episode. A policy is seated as crew four times in five and as the
+impostor once. A prompt for crew alone throws away a fifth of its score.
 
 ## What your seat sees
 
@@ -35,7 +48,7 @@ One `state` frame per decision point (and once more at episode end). Everything
 in it is visible to that seat; **nothing else is**.
 
 ```json
-{"type":"state","protocol":"hidden_agenda.player.v1","slot":1,"role":"crew",
+{"type":"state","protocol":"hidden_agenda.player.v2","slot":1,"role":"crew",
  "name":"BLUE","tick":812,"maxTicks":3000,"decision":4,"cause":"witness",
  "phase":"meeting","chat":false,
  "you":{"cell":[13,15],"facing":"N","carrying":1,"carryCap":2,"state":"active",

@@ -9,9 +9,9 @@ the only channel anybody has is a visible, changeable vote.
 * **Seats:** 5 (4 crew + 1 impostor), zero-sum: `+1 ×4 / −4`, or `−1 ×4 / +4`.
 * **Crew win** at 32 deposits, or by ejecting the impostor.
 * **Impostor wins** when only one crewmate is left. Tick 3000 is a 0-0 tie.
-* **A policy is just a prompt.** `PLAYER_PROMPT="<strategy>"` fields an LLM
-  policy; `PLAYER_SCRIPTED=miner|lurker` fields a scripted baseline. Same image,
-  env-switched.
+* **Policies share one image.** `PLAYER_PROMPT="<strategy>"` fields an LLM
+  policy; `PLAYER_JEV=1` ranks bounded plans and votes with System One;
+  `PLAYER_SCRIPTED=miner|lurker` fields a scripted baseline.
 
 Watch it: <https://softmax.com/hidden-agenda>
 
@@ -52,6 +52,9 @@ Crew jobs: `mine at:<seam>` `deposit` `watch who:<alias>` `patrol room:<room>`
 Full rules: [docs/RULES.md](docs/RULES.md). Wire formats:
 [docs/PROTOCOL.md](docs/PROTOCOL.md). Fielding a policy:
 [docs/POLICIES.md](docs/POLICIES.md).
+
+The [historical Jev pilot](docs/JEV_PILOT.md) records paired no-talk episodes, token
+counts, and the local five-player smoke test.
 Post-training from native games: [TRAINING.md](TRAINING.md).
 
 ## Layout
@@ -60,7 +63,7 @@ Post-training from native games: [TRAINING.md](TRAINING.md).
 |---|---|
 | `src/hidden_agenda.nim` | entrypoint; the seed is randomised HERE, before `config.update` |
 | `src/hidden_agenda/` | the sim module: `sim_types` `station` `vision` `kernel` `meeting` `sim` `scripted` `llm` `replays` `broadcast` `global` `server` |
-| `src/hidden_agenda_player.nim` | the thin prompt-carrying seat (`/bin/hidden-agenda-player`) |
+| `src/hidden_agenda_player.nim` | the thin policy selector (`/bin/hidden-agenda-player`) |
 | `client/` | `chrome_common.js` (byte-identical to the starter's), `broadcast_core.js` (the board renderer), `replay_broadcast.html` (the starter's page + this game's block) |
 | `replay-viewer/` | the wasm entry point and the static bundle's JS shell |
 | `data/maps/vault.txt` | THE map. 27 × 19 ASCII, the specification not an illustration |

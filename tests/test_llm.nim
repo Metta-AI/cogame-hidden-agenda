@@ -7,7 +7,7 @@
 import std/[json, strutils, unicode]
 import curly
 import support/helpers
-import hidden_agenda/[sim_types, station, sim_config, sim_state, sim, llm]
+import hidden_agenda/[sim_types, sim_config, sim_state, sim, llm]
 
 template check(condition: bool, message: string) =
   if not condition:
@@ -493,5 +493,6 @@ block theRetryBatchAndTheFallbackAreDriven:
     for index in 1 ..< decisions.len:
       check(decisions[index].source == dsRetry,
         "and the rest as retry")
+
 
 echo "test_llm: ok"
