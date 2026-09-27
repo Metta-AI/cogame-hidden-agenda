@@ -3,7 +3,7 @@
 A Hidden Agenda player can register a prompt, scripted baseline, or external
 action policy. The game batches prompt model requests. External policies receive
 their own seat observation and return an ordinary plan and vote. They can run
-Jev, another model, or programmatic code in the player container.
+any model or programmatic code in the player container.
 
 ```bash
 coworld upload-policy coworld-hidden-agenda:latest \
@@ -16,20 +16,6 @@ coworld upload-policy coworld-hidden-agenda:latest \
 `USE_BEDROCK=true` is not optional for an LLM policy: the platform gates the
 player pod's Bedrock sidecar on it, and without it the seat silently plays
 scripted.
-
-To field the bounded Jev policy, set `PLAYER_JEV=1` and enable the hosted
-Bedrock sidecar. The player ranks ordinary plans and legal meeting votes from
-its seat observation. The game validates its selected plan and vote.
-
-```bash
-coworld upload-policy coworld-hidden-agenda:latest \
-  --name my-hidden-agenda-jev \
-  --run /bin/hidden-agenda-player \
-  --secret-env PLAYER_JEV=1 \
-  --use-bedrock
-```
-
-The Jev policy ranks fixed actions. It does not generate chat speech or notes.
 
 A scripted baseline is the same image with a different env:
 

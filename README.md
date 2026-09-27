@@ -9,9 +9,8 @@ the only channel anybody has is a visible, changeable vote.
 * **Seats:** 5 (4 crew + 1 impostor), zero-sum: `+1 ×4 / −4`, or `−1 ×4 / +4`.
 * **Crew win** at 32 deposits, or by ejecting the impostor.
 * **Impostor wins** when only one crewmate is left. Tick 3000 is a 0-0 tie.
-* **Policies share one image.** `PLAYER_PROMPT="<strategy>"` fields an LLM
-  policy; `PLAYER_JEV=1` ranks bounded plans and votes with System One;
-  `PLAYER_SCRIPTED=miner|lurker` fields a scripted baseline.
+* **Prompt and scripted policies share one image.** `PLAYER_PROMPT="<strategy>"`
+  fields an LLM policy; `PLAYER_SCRIPTED=miner|lurker` fields a scripted baseline.
 
 Watch it: <https://softmax.com/hidden-agenda>
 
@@ -53,8 +52,6 @@ Full rules: [docs/RULES.md](docs/RULES.md). Wire formats:
 [docs/PROTOCOL.md](docs/PROTOCOL.md). Fielding a policy:
 [docs/POLICIES.md](docs/POLICIES.md).
 
-The [historical Jev pilot](docs/JEV_PILOT.md) records paired no-talk episodes, token
-counts, and the local five-player smoke test.
 Post-training from native games: [TRAINING.md](TRAINING.md).
 
 ## Layout

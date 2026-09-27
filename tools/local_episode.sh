@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mode=${1:?usage: local_episode.sh miner|jev seed crew|impostor [smoke|variant]}
-seed=${2:?seed required}
-role=${3:?role required}
-profile=${4:-smoke}
+seed=${1:?usage: local_episode.sh seed crew|impostor [smoke|variant]}
+role=${2:?role required}
+profile=${3:-smoke}
 port=${PORT:-18118}
-case "$mode" in miner|jev) ;; *) exit 2 ;; esac
 case "$role" in crew|impostor) ;; *) exit 2 ;; esac
 case "$profile" in smoke|variant) ;; *) exit 2 ;; esac
 
@@ -58,39 +56,25 @@ for _ in {1..50}; do
   sleep 0.1
 done
 for slot in {0..4}; do
-  if [ "$slot" = 0 ] && [ "$mode" = jev ]; then
-    COWORLD_PLAYER_WS_URL="ws://127.0.0.1:$port/player?slot=$slot&token=t$slot" \
-      PLAYER_JEV=1 tmp/bin/hidden-agenda-player \
-      > "$episode_dir/player$slot.log" 2>&1 &
-  else
-    COWORLD_PLAYER_WS_URL="ws://127.0.0.1:$port/player?slot=$slot&token=t$slot" \
-      PLAYER_SCRIPTED=miner tmp/bin/hidden-agenda-player \
-      > "$episode_dir/player$slot.log" 2>&1 &
-  fi
+  COWORLD_PLAYER_WS_URL="ws://127.0.0.1:$port/player?slot=$slot&token=t$slot" \
+    PLAYER_SCRIPTED=miner tmp/bin/hidden-agenda-player \
+    > "$episode_dir/player$slot.log" 2>&1 &
   players+=("$!")
 done
 wait "$game"
 python3 - "$episode_dir" <<'PY'
 import json
-import re
 import sys
 from pathlib import Path
 
 path = Path(sys.argv[1])
 results = json.loads((path / 'results.json').read_text())
 replay = json.loads((path / 'replay.json').read_text())
-log = (path / 'game.log').read_text()
-usage = [tuple(map(int, match)) for match in re.findall(
-    r'input_tokens (\d+) output_tokens (\d+)',
-    (path / 'player0.log').read_text())]
 orders = [event for event in replay['events']
           if event['k'] == 'order' and event['seat'] == 0]
 print(json.dumps({
     'artifacts': str(path), 'seat0_score': results['scores'][0],
     'winner': results['winner'], 'ending': results['ending'],
-    'jev_calls': len(usage), 'input_tokens': sum(x[0] for x in usage),
-    'output_tokens': sum(x[1] for x in usage),
     'seat0_fallbacks': sum(event['source'] == 'fallback' for event in orders),
-    'seat0_jev_orders': sum(event['source'] == 'external' for event in orders),
 }))
 PY
