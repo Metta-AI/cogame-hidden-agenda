@@ -212,7 +212,7 @@ MANIFEST = {
             "type": "game",
             "image": IMAGE,
             "run": ["/bin/hidden-agenda"],
-            "env": {"ANTHROPIC_API_KEY_URI": SECRET_URI},
+            "env": {},
             "source_url":
                 "https://github.com/Metta-AI/cogame-hidden-agenda/tree/main",
         },
