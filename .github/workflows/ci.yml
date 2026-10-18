@@ -166,6 +166,8 @@ jobs:
           nim c -d:release --path:src -o:/tmp/hidden-agenda-player src/hidden_agenda_player.nim
           python3 tools/test_native_prompts.py /tmp/hidden-agenda-game /tmp/hidden-agenda-player \
             "$RUNNER_TEMP/hidden-agenda-native" "$(git rev-parse HEAD)" --smoke
+          python3 tools/test_native_prompts.py /tmp/hidden-agenda-game /tmp/hidden-agenda-player \
+            "$RUNNER_TEMP/hidden-agenda-accepted" "$(git rev-parse HEAD)" --accepted-fixture
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

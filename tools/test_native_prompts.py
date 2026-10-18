@@ -7,7 +7,34 @@ import socket
 import subprocess
 import sys
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
+
+
+class ReplyHandler(BaseHTTPRequestHandler):
+    """Reject the first reply, then supply a valid full plan over real HTTP."""
+
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        retry = "previous reply was invalid" in request["messages"][0]["content"]
+        text = (
+            json.dumps(
+                {"plan": [{"job": "hold"}], "vote": "skip", "notes": "Private mémoire"}
+            )
+            if retry
+            else "invalid reply"
+        )
+        body = json.dumps({"content": [{"type": "text", "text": text}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *args):
+        pass
+
 
 ROOT = Path(__file__).resolve().parents[1]
 GAME, PLAYER = (str(Path(arg).resolve()) for arg in sys.argv[1:3])
@@ -16,6 +43,7 @@ REVISION = sys.argv[4]
 OUTPUT.mkdir(parents=True, exist_ok=False)
 manifest = json.loads((ROOT / "coworld_manifest_template.json").read_text())
 variants = {entry["id"]: entry["game_config"] for entry in manifest["variants"]}
+accepted_fixture = "--accepted-fixture" in sys.argv
 cases = [(variant, "canonical") for variant in variants]
 if "--smoke" not in sys.argv:
     cases += [
@@ -30,6 +58,8 @@ if "--smoke" not in sys.argv:
             "mixed",
         )
     ]
+if accepted_fixture:
+    cases = [("hidden-agenda", "canonical")]
 for variant, wording in cases:
     output = OUTPUT / f"{variant}-{wording}"
     output.mkdir(mode=0o700)
@@ -39,6 +69,12 @@ for variant, wording in cases:
     # This socket is bound but never listens: native HTTP receives connection refusal.
     with socket.socket() as unavailable:
         unavailable.bind(("127.0.0.1", 0))
+        endpoint_port = unavailable.getsockname()[1]
+        if accepted_fixture:
+            httpd = ThreadingHTTPServer(("127.0.0.1", 0), ReplyHandler)
+            endpoint_port = httpd.server_port
+            worker = Thread(target=httpd.serve_forever, daemon=True)
+            worker.start()
         config: dict = {
             **variants[variant],
             "seed": 7,
@@ -61,8 +97,10 @@ for variant, wording in cases:
             "COWORLD_EPISODE_ID": f"hidden-agenda-{variant}-{wording}",
             "COWORLD_GAME_VERSION": "source-validation",
             "COWORLD_SOURCE_REVISION": REVISION,
-            "COWORLD_LLM_ENDPOINT": f"http://127.0.0.1:{unavailable.getsockname()[1]}",
-            "COWORLD_LLM_MODEL": "unavailable/validation",
+            "COWORLD_LLM_ENDPOINT": f"http://127.0.0.1:{endpoint_port}",
+            "COWORLD_LLM_MODEL": "fixture/validation"
+            if accepted_fixture
+            else "unavailable/validation",
             "PLAYER_PROMPT": "Private station strategy.",
             "PLAYER_SCRIPTED": "",
         }
@@ -117,7 +155,7 @@ for variant, wording in cases:
                 if event["event_type"] == "decision_observed"
             }
             assert len(observed) == len(orders)
-            systems, attempts = {}, {}
+            systems, attempts, accepted_actions = {}, {}, {}
             for path in (output / "attempts").glob("*.jsonl"):
                 start, finish = [
                     json.loads(line) for line in path.read_text().splitlines()
@@ -126,7 +164,16 @@ for variant, wording in cases:
                 assert (
                     start["source_revision"] == REVISION and start["origin"] == "model"
                 )
-                assert not finish["accepted"] and finish["normalized_action"] is None
+                index = int(start["attempt_id"].rsplit("-", 1)[1])
+                if accepted_fixture and index == 1:
+                    assert finish["accepted"]
+                    accepted_actions[start["decision"], start["seat"]] = finish[
+                        "normalized_action"
+                    ]
+                else:
+                    assert (
+                        not finish["accepted"] and finish["normalized_action"] is None
+                    )
                 assert start["attempt_id"] == finish["attempt_id"]
                 metadata = start["prompt_template"]
                 assert metadata["variant"] == (
@@ -146,7 +193,6 @@ for variant, wording in cases:
                 assert (
                     metadata["user_sha256"] == hashlib.sha256(user.encode()).hexdigest()
                 )
-                index = int(start["attempt_id"].rsplit("-", 1)[1])
                 assert ("previous reply was invalid" in user) == (index == 1)
                 attempts.setdefault((start["decision"], seat), []).append(index)
             assert len(systems) == 5
@@ -156,9 +202,20 @@ for variant, wording in cases:
                 if order["source"] == "budget":
                     assert key not in attempts
                 else:
-                    assert order["source"] == "fallback"
+                    assert order["source"] == (
+                        "retry" if accepted_fixture else "fallback"
+                    )
                     assert sorted(attempts.pop(key)) == [0, 1]
+                    if accepted_fixture:
+                        action = {
+                            field: order[field]
+                            for field in ("plan", "vote", "say", "hunch", "notes")
+                        }
+                        if order["switch"] is not None:
+                            action["switch"] = order["switch"]
+                        assert action == accepted_actions.pop(key)
             assert not attempts
+            assert not accepted_actions
             assert (
                 "Private station strategy." not in (output / "replay.json").read_text()
             )
@@ -176,3 +233,7 @@ for variant, wording in cases:
                     process.wait(timeout=10)
             for log in logs:
                 log.close()
+            if accepted_fixture:
+                httpd.shutdown()
+                httpd.server_close()
+                worker.join(timeout=10)
