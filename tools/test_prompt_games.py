@@ -142,4 +142,34 @@ if __name__ == "__main__":
                     actual = play(binary, variant, "mixed", seed, language, prompt_seed)
                     assert actual[:2] == reference[:2]
                     count += 1
-    print(count, "complete games preserve role rules, notes, actions and outcomes")
+    for wording in WORDINGS[5:]:
+        rejected = subprocess.run(
+            [
+                str(binary),
+                str(ROOT / "coworld_manifest_template.json"),
+                "hidden-agenda",
+                "--language",
+            ],
+            input=json.dumps(
+                {
+                    "kind": "reset",
+                    "players": 5,
+                    "seed": "wording-1",
+                    "promptVariant": wording,
+                    "split": "train",
+                }
+            )
+            + "\n",
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert (
+            rejected.returncode != 0
+            and "held-out wording is evaluation only" in rejected.stderr
+        )
+        assert not rejected.stdout
+    print(
+        count,
+        "complete games preserve role rules, notes, actions and outcomes; held-out training rejected",
+    )
