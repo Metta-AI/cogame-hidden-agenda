@@ -32,7 +32,7 @@ import curly
 import mummy
 import mummy/routers
 import sim_types, sim_config, sim_state, sim, scripted, llm,
-  global, replays, wire_constants
+  global, replays, wire_constants, prompts, evidence
 
 const
   PlayerPage = staticRead("../../client/player.html")
@@ -186,6 +186,22 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
 proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = gameConfig
+    let trace = getEnv("HIDDEN_AGENDA_HOST_TRACE")
+    let selection = promptSelection(parseJson(runtimeConfig.config))
+    var observedEvents = 0
+    if trace.len > 0:
+      writePrivate(trace, $(%*{"event_type": "host_started", "visibility": "private",
+        "source_revision": getEnv("HIDDEN_AGENDA_SOURCE_REVISION"),
+        "prompt_selection": selection.selectionMetadata(),
+        "config": parseJson(runtimeConfig.config)}) & "\n")
+    proc recordExecution(view: Sim) =
+      if trace.len > 0:
+        for index in observedEvents ..< view.log.rows.len:
+          let event = view.log.rows[index]
+          if event["k"].getStr() == "order":
+            appendPrivate(trace, %*{"event_type": "action_applied", "visibility": "private",
+              "order": event})
+        observedEvents = view.log.rows.len
     let gameStart = epochTime()
     let connectDeadline = gameStart +
       config.playerConnectTimeoutSeconds.float
@@ -244,6 +260,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     proc sleeper(seconds: float) {.closure.} =
       sleep(int(seconds * 1000.0))
     let driver = newDecisionDriver(client, config, prompts, kinds,
+      selection,
       clock, sleeper)
 
     proc decide(view: var Sim, seats: seq[int], cause: string):
@@ -272,6 +289,15 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               shared.playerSockets[seat].send($ %*{
                 "type": "observation", "id": decisionId,
                 "observation": seatView(view, seat, cause)})
+      if trace.len > 0:
+        for seat in seats:
+          let system = systemPrompt(view, seat, selection)
+          let user = userPrompt(view, seat, driver.prompts[seat], cause)
+          appendPrivate(trace, %*{"event_type": "decision_observed", "visibility": "private",
+            "decision": view.decisions, "seat": seat, "tick": view.tick,
+            "observation": seatView(view, seat, cause),
+            "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "prompt_template": selection.promptMetadata(system, user)})
       result = driver.decide(view, seats, cause)
       if requestExternal:
         let started = epochTime()
@@ -299,11 +325,16 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               driver.hasPrevious[seat] = true
 
     proc onTick(view: var Sim) {.closure.} =
+      recordExecution(view)
       if view.tick mod 24 == 0 or view.done:
         withLock stateLock:
           refreshSnapshotLocked()
 
     gameSim.runEpisode(decide, clock, playDeadlineSeconds(config), onTick)
+    recordExecution(gameSim)
+    if trace.len > 0:
+      appendPrivate(trace, %*{"event_type": "host_completed", "visibility": "private",
+        "results": gameSim.resultsJson(), "prompt_selection": selection.selectionMetadata()})
     withLock stateLock:
       pushStateFrames("final")
     finishEpisode(runtimeConfig)

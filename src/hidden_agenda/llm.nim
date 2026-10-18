@@ -21,7 +21,7 @@ import std/[json, os, strutils, times]
 import bitworld/runtime
 import curly
 import sim_types, station, sim_config, sim_state, vision, kernel, sim,
-  scripted
+  scripted, prompts, training, evidence
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -339,10 +339,9 @@ proc jobList(role: Role): string =
   else:
     "mine | deposit | watch | patrol | guard | hold"
 
-proc systemPrompt*(sim: Sim, slot: int): string =
+proc systemPrompt*(sim: Sim, slot: int, selection: PromptSelection): string =
   let cog = sim.cogs[slot]
-  result.add("You are " & Aliases[slot] & ", one of five cogs mining a " &
-    "sealed station. Four are CREW and exactly ONE is the IMPOSTOR. ")
+  result.add(selection.introduction(Aliases[slot]))
   if cog.role == rImpostor:
     result.add("YOU ARE THE IMPOSTOR: the other four are all crew. ")
   else:
@@ -768,11 +767,13 @@ proc decideAll*(
   seats: seq[int],
   prompts: seq[string],
   scriptedKinds: seq[ScriptKind],
-  cause: string
+  cause: string,
+  selection: PromptSelection
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order. NEVER raises: any failure falls
   ## back to the `miner` decision so the episode always advances. `prompts` and
   ## `scriptedKinds` are indexed by SEAT.
+  let destination = getEnv("HIDDEN_AGENDA_ATTEMPT_TRACE_DIR")
   result = newSeq[Decision](seats.len)
   var open: seq[int]
   for index, seat in seats:
@@ -794,7 +795,21 @@ proc decideAll*(
       var user = userPrompt(sim, seat, prompts[seat], cause)
       if attempt > 0:
         user.add(RetryHint)
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let system = systemPrompt(sim, seat, selection)
+      let request = client.requestFor(system, user, seat)
+      if destination.len > 0:
+        let identity = $sim.decisions & "-" & $seat & "-" & $attempt
+        let model = if client.transport == ltBedrock:
+          client.bedrockModels[client.bedrockModel] else: client.model
+        writePrivate(destination / (identity & ".jsonl"), $(%*{
+          "event_type": "attempt_started", "visibility": "private", "attempt_id": identity,
+          "decision": sim.decisions, "seat": seat, "tick": sim.tick,
+          "origin": (if client.sendBatch == nil: "model" else: "unknown"),
+          "source_revision": getEnv("HIDDEN_AGENDA_SOURCE_REVISION"),
+          "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+          "prompt_template": selection.promptMetadata(system, user),
+          "request": {"transport": $client.transport, "model": model,
+            "body": parseJson(request.body)}}) & "\n")
       batch.post(request.url, request.headers, request.body, $index)
     ## ONE parallel batch for every open seat. Never a loop of single calls.
     let started = epochTime()
@@ -807,17 +822,35 @@ proc decideAll*(
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var accepted = false
+      var responseText = ""
+      var rejection = ""
+      var normalized = newJNull()
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
+        responseText = text
         var decision = parseReply(sim, seat, extractJsonObject(text))
+        normalized = decision.decisionAction(sim.config.chat)
+        accepted = true
         decision.source = if attempt == 0: dsLlm else: dsRetry
         decision.latencyMs = latency
         result[index] = decision
       except CatchableError as error:
+        rejection = error.msg
         echo "hidden-agenda llm: seat ", seat, " attempt ", attempt + 1,
           " failed: ", cleanText(error.msg, MaxErrorLen)
         stillOpen.add(index)
+      if destination.len > 0:
+        let identity = $sim.decisions & "-" & $seat & "-" & $attempt
+        appendPrivate(destination / (identity & ".jsonl"), %*{
+          "event_type": "attempt_finished", "attempt_id": identity,
+          "accepted": accepted, "response": responseText,
+          "raw_response": responses[position].response.body,
+          "http_status": responses[position].response.code,
+          "transport_error": responses[position].error, "rejection_reason": rejection,
+          "normalized_action": normalized, "latency_ms": latency,
+          "platform_call_id": newJNull(), "behavior_logprobs": newJNull()})
     open = stillOpen
   for index in open:
     let seat = seats[index]
@@ -834,6 +867,7 @@ proc decideAll*(
 type
   DecisionDriver* = ref object
     client*: LlmClient
+    selection*: PromptSelection
     prompts*: seq[string]
     scriptedKinds*: seq[ScriptKind]
     minBatchSeconds*: int
@@ -849,11 +883,12 @@ type
     batchSizes*: seq[int]
 
 proc newDecisionDriver*(client: LlmClient, config: GameConfig,
-    prompts: seq[string], scriptedKinds: seq[ScriptKind],
+    prompts: seq[string], scriptedKinds: seq[ScriptKind], selection: PromptSelection,
     clock: proc (): float {.closure.} = nil,
     sleeper: proc (seconds: float) {.closure.} = nil): DecisionDriver =
   DecisionDriver(
     client: client,
+    selection: selection,
     prompts: prompts,
     scriptedKinds: scriptedKinds,
     minBatchSeconds: config.minBatchSeconds,
@@ -902,7 +937,7 @@ proc decide*(driver: DecisionDriver, sim: var Sim, seats: seq[int],
   driver.batches.inc
   driver.batchSizes.add(seats.len)
   result = decideAll(driver.client, sim, seats, driver.prompts,
-    driver.scriptedKinds, cause)
+    driver.scriptedKinds, cause, driver.selection)
   for index, seat in seats:
     driver.previous[seat] = result[index]
     driver.hasPrevious[seat] = true

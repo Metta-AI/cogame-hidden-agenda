@@ -59,6 +59,11 @@ CONFIG_SCHEMA = {
     "additionalProperties": False,
     "required": ["tokens"],
     "properties": {
+        "promptVariant": {"type": "string", "default": "canonical",
+                          "enum": ["canonical", "plain", "numbered", "questions",
+                                   "reordered", "heldout-briefing",
+                                   "heldout-reference", "mixed"]},
+        "promptSeed": {"type": "integer", "minimum": 0, "default": 0},
         "tokens": {
             "type": "array", "items": {"type": "string"},
             "minItems": 1, "maxItems": SEATS,
