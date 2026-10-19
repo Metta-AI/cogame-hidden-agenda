@@ -17,7 +17,7 @@ type
     seed*: int
 
 const
-  PromptBankVersion* = "hidden-agenda-rules-v1"
+  PromptBankVersion* = "hidden-agenda-rules-v2"
 
 proc promptSelection*(node: JsonNode): PromptSelection =
   if node.kind != JObject:

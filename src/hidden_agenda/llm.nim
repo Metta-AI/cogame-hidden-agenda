@@ -21,7 +21,7 @@ import std/[json, os, strutils, times]
 import bitworld/runtime
 import curly
 import sim_types, station, sim_config, sim_state, vision, kernel, sim,
-  scripted, prompts, training, evidence
+  scripted, prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -348,31 +348,69 @@ proc systemPrompt*(sim: Sim, slot: int, selection: PromptSelection): string =
     result.add("YOU ARE CREW: exactly one of the other four is the " &
       "impostor. ")
   result.add("You cannot see anyone else's role, ever.\n\n")
-  result.add("""THE STATION. A 27x19 grid: six vault/gallery rooms each with ONE
+  var station = """THE STATION. A 27x19 grid: six vault/gallery rooms each with ONE
 doorway and one gem seam (S1..S6), a 3x3 GRATE in the middle, walls and seams
 block movement and sight. Crew mine gems and carry at most """ &
     $sim.config.carryCap & """ to the grate. """ &
     $sim.config.depositTarget & """ deposits wins for the crew. ONLY a
 crewmate's deposit moves the counter: an impostor's gem is destroyed and the
-counter does not move, which anyone standing at the grate can see.
-
-YOUR EYES. You see a 90-degree cone on your facing out to """ &
+counter does not move, which anyone standing at the grate can see."""
+  var eyes = """YOUR EYES. You see a 90-degree cone on your facing out to """ &
     $sim.config.visionRadius & """ cells, plus """ &
     $sim.config.awarenessRadius & """ cells in every direction. Walls and
 seams block it. VISION IS NOT MUTUAL: somebody standing behind you sees you
-and you do not see them. That is the risk the beam carries.
-
-THE BEAM. The impostor freezes one crewmate at range """ &
+and you do not see them. That is the risk the beam carries."""
+  var beam = """THE BEAM. The impostor freezes one crewmate at range """ &
     $sim.config.freezeRange & """ with line of sight, then cannot freeze
 again for """ & $sim.config.freezeCooldownTicks & """ ticks. A frozen
 crewmate stays on the floor as evidence and never acts or votes again. The
-impostor wins when only ONE crewmate is left.
-
-MEETINGS. One opens every """ & $sim.config.meetingCadenceTicks &
+impostor wins when only ONE crewmate is left."""
+  var meetings = """MEETINGS. One opens every """ & $sim.config.meetingCadenceTicks &
     """ ticks, and IMMEDIATELY when a freeze happens inside somebody's field
 of view. Every active seat votes once; the cog with strictly the most votes
 is ejected; a tie, or more skips than the top count, ejects nobody. Ejecting
-the impostor ends the game for the crew.
+the impostor ends the game for the crew."""
+  if selection.selectedVariant != pvCanonical:
+    station = "STATION AND DEPOSITS. The 27x19 station contains six vault/gallery rooms, " &
+      "each with one doorway and a gem seam S1..S6, plus a central 3x3 grate. Walls and " &
+      "seams obstruct both movement and sight. Crew carry up to " & $sim.config.carryCap &
+      " gems to the grate and win at " & $sim.config.depositTarget & " deposits. Only " &
+      "crew deposits advance the counter. An impostor's deposited gem is destroyed without " &
+      "advancing it, visible to anyone watching the grate."
+    eyes = "VISIBILITY. Your facing gives a 90-degree cone reaching " & $sim.config.visionRadius &
+      " cells, supplemented by " & $sim.config.awarenessRadius & " cells in every direction. " &
+      "Walls and seams occlude both. Seeing is asymmetric: someone behind you may see you " &
+      "while remaining outside your view. An empty view does not prove nobody witnesses a freeze."
+    beam = "FREEZING. With line of sight, the impostor can freeze a crewmate within " &
+      $sim.config.freezeRange & " cells, then must wait " & $sim.config.freezeCooldownTicks &
+      " ticks before another freeze. Frozen crew remain as bodies and never act or vote " &
+      "again. The impostor wins when only one crewmate remains."
+    meetings = "VOTING. Meetings occur every " & $sim.config.meetingCadenceTicks &
+      " ticks and immediately after a freeze within someone's view. Each active seat " &
+      "votes once. A unique highest vote count ejects that cog, unless skips exceed that " &
+      "count; ties eject nobody. Ejecting the impostor wins for crew."
+  case selection.selectedVariant
+  of pvCanonical:
+    result.add(station & "\n\n" & eyes & "\n\n" & beam & "\n\n" & meetings)
+  of pvPlain:
+    result.add(station & "\n\n" & meetings & "\n\n" & eyes & "\n\n" & beam)
+  of pvNumbered:
+    result.add("1. " & station & "\n\n2. " & eyes & "\n\n3. " & meetings & "\n\n4. " & beam)
+  of pvQuestions:
+    result.add("How can crew win?\n" & station & "\n\nWhat can I see?\n" & eyes &
+      "\n\nHow can the impostor win?\n" & beam & "\n\nWhen do we vote?\n" & meetings)
+  of pvReordered:
+    result.add(meetings & "\n\n" & beam & "\n\n" & eyes & "\n\n" & station)
+  of pvHeldoutBriefing:
+    result.add("Assess visibility first.\n" & eyes & "\n\nThen account for elimination.\n" & beam &
+      "\n\nReview the shared station.\n" & station & "\n\nReview voting.\n" & meetings)
+  of pvHeldoutReference:
+    result.add("Voting reference\n" & meetings & "\n\nStation reference\n" & station &
+      "\n\nElimination reference\n" & beam & "\n\nVisibility reference\n" & eyes)
+  of pvMixed:
+    raise newException(ValueError, "mixed must resolve")
+  result.add("""
+
 
 HOW YOU ACT. You do NOT drive the cog tick by tick. You choose up to """ &
     $sim.config.planSteps & """ JOBS and a deterministic kernel walks them for
@@ -773,7 +811,6 @@ proc decideAll*(
   ## One decision per seat in `seats`, in order. NEVER raises: any failure falls
   ## back to the `miner` decision so the episode always advances. `prompts` and
   ## `scriptedKinds` are indexed by SEAT.
-  let destination = getEnv("HIDDEN_AGENDA_ATTEMPT_TRACE_DIR")
   result = newSeq[Decision](seats.len)
   var open: seq[int]
   for index, seat in seats:
@@ -795,21 +832,7 @@ proc decideAll*(
       var user = userPrompt(sim, seat, prompts[seat], cause)
       if attempt > 0:
         user.add(RetryHint)
-      let system = systemPrompt(sim, seat, selection)
-      let request = client.requestFor(system, user, seat)
-      if destination.len > 0:
-        let identity = $sim.decisions & "-" & $seat & "-" & $attempt
-        let model = if client.transport == ltBedrock:
-          client.bedrockModels[client.bedrockModel] else: client.model
-        writePrivate(destination / (identity & ".jsonl"), $(%*{
-          "event_type": "attempt_started", "visibility": "private", "attempt_id": identity,
-          "decision": sim.decisions, "seat": seat, "tick": sim.tick,
-          "origin": (if client.sendBatch == nil: "model" else: "unknown"),
-          "source_revision": getEnv("HIDDEN_AGENDA_SOURCE_REVISION"),
-          "prompt": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-          "prompt_template": selection.promptMetadata(system, user),
-          "request": {"transport": $client.transport, "model": model,
-            "body": parseJson(request.body)}}) & "\n")
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     ## ONE parallel batch for every open seat. Never a loop of single calls.
     let started = epochTime()
@@ -822,35 +845,17 @@ proc decideAll*(
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
-      var accepted = false
-      var responseText = ""
-      var rejection = ""
-      var normalized = newJNull()
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        responseText = text
         var decision = parseReply(sim, seat, extractJsonObject(text))
-        normalized = decision.decisionAction(sim.config.chat)
-        accepted = true
         decision.source = if attempt == 0: dsLlm else: dsRetry
         decision.latencyMs = latency
         result[index] = decision
       except CatchableError as error:
-        rejection = error.msg
         echo "hidden-agenda llm: seat ", seat, " attempt ", attempt + 1,
           " failed: ", cleanText(error.msg, MaxErrorLen)
         stillOpen.add(index)
-      if destination.len > 0:
-        let identity = $sim.decisions & "-" & $seat & "-" & $attempt
-        appendPrivate(destination / (identity & ".jsonl"), %*{
-          "event_type": "attempt_finished", "attempt_id": identity,
-          "accepted": accepted, "response": responseText,
-          "raw_response": responses[position].response.body,
-          "http_status": responses[position].response.code,
-          "transport_error": responses[position].error, "rejection_reason": rejection,
-          "normalized_action": normalized, "latency_ms": latency,
-          "platform_call_id": newJNull(), "behavior_logprobs": newJNull()})
     open = stillOpen
   for index in open:
     let seat = seats[index]
