@@ -32,7 +32,7 @@ import curly
 import mummy
 import mummy/routers
 import sim_types, sim_config, sim_state, sim, scripted, llm,
-  global, replays, wire_constants
+  global, replays, wire_constants, prompts
 
 const
   PlayerPage = staticRead("../../client/player.html")
@@ -186,6 +186,7 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
 proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
   {.gcsafe.}:
     let config = gameConfig
+    let selection = promptSelection(parseJson(runtimeConfig.config))
     let gameStart = epochTime()
     let connectDeadline = gameStart +
       config.playerConnectTimeoutSeconds.float
@@ -243,7 +244,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
     proc clock(): float {.closure.} = epochTime() - gameStart
     proc sleeper(seconds: float) {.closure.} =
       sleep(int(seconds * 1000.0))
-    let driver = newDecisionDriver(client, config, prompts, kinds,
+    let driver = newDecisionDriver(client, config, prompts, kinds, selection,
       clock, sleeper)
 
     proc decide(view: var Sim, seats: seq[int], cause: string):

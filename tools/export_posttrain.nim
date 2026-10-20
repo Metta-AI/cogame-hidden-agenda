@@ -1,29 +1,17 @@
 ## Complete native episodes with the exact hosted prompt for each active seat.
 
 import std/[json, os, osproc, strutils]
-import hidden_agenda/[sim, scripted, llm]
-
-proc reply(decision: Decision, chat: bool): JsonNode =
-  var plan = newJArray()
-  for step in decision.plan:
-    var order = %*{"job": $step.job}
-    if step.at.len > 0: order["at"] = %step.at
-    if step.who.len > 0: order["who"] = %step.who
-    if step.room.len > 0: order["room"] = %step.room
-    plan.add(order)
-  result = %*{
-    "plan": plan, "vote": decision.vote,
-    "say": (if chat: decision.say else: ""),
-    "hunch": decision.hunch, "notes": decision.notes
-  }
-  if decision.switchIf.len > 0:
-    result["switch"] = %*{"if": decision.switchIf,
-      "to": decision.switchTo}
+import hidden_agenda/[sim, scripted, llm, prompts, training]
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 3:
-    quit("usage: hidden-agenda-posttrain OUTPUT EPISODES VARIANT", 1)
+  if args.len < 3 or args.len > 5:
+    quit("usage: hidden-agenda-posttrain OUTPUT EPISODES VARIANT [PROMPT_VARIANT PROMPT_SEED]", 1)
+  var promptConfig = newJObject()
+  if args.len >= 4: promptConfig["promptVariant"] = %args[3]
+  if args.len >= 5: promptConfig["promptSeed"] = %parseInt(args[4])
+  let configured = promptSelection(promptConfig)
+  doAssert configured.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference}, "held-out wording is evaluation only"
   let output = args[0]
   let episodes = parseInt(args[1])
   let variant = args[2]
@@ -42,7 +30,13 @@ when isMainModule:
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
+    wordingCounts: array[2, int]
   for seed in 1 .. episodes:
+    var selection = configured
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+      inc wordingCounts[partition]
     variantConfig["seed"] = %seed
     var config = defaultGameConfig()
     config.update($variantConfig)
@@ -54,18 +48,20 @@ when isMainModule:
         let baseline = if view.cogs[seat].role == rImpostor:
           skLurker else: skMiner
         let teacher = scriptedDecision(view, seat, baseline, view.inMeeting)
-        let completion = reply(teacher, view.config.chat)
+        let completion = decisionAction(teacher, view.config.chat)
         var accepted = view.parseReply(seat, completion)
         doAssert accepted.plan == teacher.plan
         doAssert accepted.vote == teacher.vote
         accepted.source = dsScripted
         result.add(accepted)
         rows.add($(%*{
-          "episode_id": "hidden-agenda-" & variant & "-" & $seed,
-          "seed": "hidden-agenda-" & variant & "-" & $seed,
+          "episode_id": "hidden-agenda-" & variant & "-" & $seed & "-" &
+            $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed,
+          "seed": "hidden-agenda-" & $seed,
+          "prompt_template": selection.promptMetadata(systemPrompt(view, seat, selection), userPrompt(view, seat, "", cause)),
           "decision_id": rows.len,
           "prompt": [
-            {"role": "system", "content": systemPrompt(view, seat)},
+            {"role": "system", "content": systemPrompt(view, seat, selection)},
             {"role": "user", "content": userPrompt(view, seat, "", cause)}
           ],
           "completion": [{"role": "assistant", "content": $completion}],

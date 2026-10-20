@@ -1,38 +1,46 @@
 # Hidden Agenda post-training
 
-`tools/export_posttrain.nim` plays complete native episodes for all three
-certified variants. At each opening or meeting, it captures the system and
-user prompts the hosted game gives each active seat. The shipped miner and
-lurker policies supply replies accepted by the production parser. All seats
-choose from the same pre-decision state, and whole episodes stay in one data
-split. The no-talk variants leave `say` empty because the game ignores speech.
+Five training rule presentations (`canonical`, `plain`, `numbered`, `questions`,
+`reordered`) and two evaluation presentations (`heldout-briefing`,
+`heldout-reference`) vary station objectives, asymmetric visibility, freezing,
+and voting. The `hidden-agenda-rules-v3` bank keeps role assignments, job syntax,
+reply format, and sampled rule values intact. Alternatives use independently
+phrased explanations. Canonical and plain messages remain exact.
+
+`mixed` requires an independent nonnegative `promptSeed` and selects seed modulo
+five. Selection remains fixed throughout an episode. The native host and both
+bridge modes share selection; training resets reject held-out presentations.
+Private observations include hashes of the actual rendered messages.
+
+## Complete teacher exports
+
+The existing exporter runs complete published games using miner/lurker teachers
+and the production reply parser. It retains train.jsonl, validation.jsonl, and
+manifest.json. Every fifth game is validation. Families use `hidden-agenda-SEED`
+across modes and wordings, preventing replicas from crossing splits. Mixed
+exports cycle wordings independently within training and validation. Episode IDs include requested selection, resolved wording, and prompt seed
+to distinguish matched collections. Held-out training exports
+are rejected.
 
 ```sh
-nimby sync nimby.lock
 nim c -d:release --path:src -o:/tmp/hidden-agenda-posttrain tools/export_posttrain.nim
-python3 tools/test_posttrain.py /tmp/hidden-agenda-posttrain
-/tmp/hidden-agenda-posttrain /tmp/hidden-agenda-data 10 hidden-agenda
+/tmp/hidden-agenda-posttrain /tmp/hidden-agenda-dataset 10 hidden-agenda mixed 0
 ```
 
-The other variant IDs are `hidden-agenda-notalk` and `hidden-agenda-blind`.
-Ten complete episodes yielded 100 train and 18 validation decisions for
-the first two variants, and 84 train and 18 validation decisions for blind.
-All 338 examples fit 4,096 tokens with a local WordLevel smoke tokenizer.
-One CPU optimizer step reduced four-example validation loss from 1.72457
-to 1.71932, 1.73310 to 1.72771, and 1.73310 to 1.72760 in variant order.
-These runs verify the post-training path, not stronger league play.
-
-From a Metta checkout with `metta-posttrain` installed:
+The other variants are `hidden-agenda-notalk` and `hidden-agenda-blind`; both
+disable speech. Complete replies preserve the normalized no-chat action.
+All seats decide against the same state before the game applies orders.
 
 ```sh
-uv run --package metta-posttrain --extra train python -m metta_posttrain.train \
-  --dataset /tmp/hidden-agenda-data --output /tmp/hidden-agenda-adapter \
-  --model Qwen/Qwen3-0.6B --max-steps 100 --max-length 4096
+python3 tools/test_prompt_games.py /absolute/train_bridge
+python3 tools/test_posttrain.py /absolute/export_posttrain
 ```
 
-The native prompt includes the acting seat's role and limited vision. It
-does not reveal another seat's role. The exporter preserves arbitrary valid
-plans, meeting votes, private notes, and speech where the variant allows it.
+Deterministic checks establish preserved behavior, not better learned play.
+Compare canonical-only and mixed training with identical initialization,
+optimizer, decision budget, opponents, and scenario families. Freeze training
+choices before held-out evaluation. Report score spread, invalid plans,
+fallbacks, incomplete games, and private-information failures.
 
 ## Numeric reinforcement learning
 
@@ -70,3 +78,6 @@ then reloaded checkpoints for four games on held-out seeds 101 and 102:
 
 These short pilots verify training, checkpoint reload, and evaluation. They do
 not establish competitive policies.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.

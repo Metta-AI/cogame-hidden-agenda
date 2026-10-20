@@ -1,11 +1,14 @@
 ## Persistent numeric decision bridge over the native Hidden Agenda simulator.
 
 import std/[json, os]
-import hidden_agenda/[sim, scripted, llm]
+import hidden_agenda/[sim, scripted, llm, training, prompts]
 
 const Variants = ["hidden-agenda", "hidden-agenda-notalk", "hidden-agenda-blind"]
 
 var
+  selection: PromptSelection
+  languageMode: bool
+  decisions: array[Seats, Decision]
   game: Sim
   seats: seq[int]
   cursor: int
@@ -34,7 +37,7 @@ proc heads(seat: int): JsonNode =
 
 proc currentDecision(): JsonNode =
   let seat = seats[cursor]
-  let system = systemPrompt(game, seat)
+  let system = systemPrompt(game, seat, selection)
   let user = userPrompt(game, seat, "", cause)
   var properties = newJObject()
   for head in heads(seat):
@@ -42,15 +45,23 @@ proc currentDecision(): JsonNode =
     for choice in head["choices"]:
       if choice.kind != JNull: legal.add(choice)
     properties[head["name"].getStr()] = %*{"enum": legal}
-  %*{"kind": "decision", "game": "hidden-agenda",
+  result = %*{"kind": "decision", "game": "hidden-agenda",
     "decision_id": decisionId, "seat": seat, "engine_seat": seat,
-    "turn": game.tick, "semantic_view": {"system": system, "user": user},
+    "turn": game.tick, "semantic_view": {"system": system, "user": user,
+      "prompt_template": selection.promptMetadata(system, user)},
     "inbox": [], "messages": [
       {"role": "system", "content": system},
       {"role": "user", "content": user}],
     "speech_messages": [],
     "action_schema": {"type": "object", "properties": properties,
       "required": ["strategy", "vote"]}, "typed_question": newJNull()}
+  if languageMode:
+    result["inference_mode"] = %"text_action"
+    result["action_schema"] = %*{"type": "object",
+      "properties": {"plan": {"type": "array"}, "vote": {"type": "string"},
+        "switch": {"type": "object"}, "say": {"type": "string"},
+        "hunch": {"type": "string"}, "notes": {"type": "string"}},
+      "required": ["plan"]}
 
 proc encoding(): JsonNode =
   let seat = seats[cursor]
@@ -101,6 +112,11 @@ proc encoding(): JsonNode =
 
 proc reset(request: JsonNode, manifestPath: string): JsonNode =
   doAssert request["players"].getInt() == Seats
+  selection = promptSelection(request)
+  if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+    doAssert request.hasKey("split") and
+      request["split"].getStr() in ["evaluation", "validation", "test"],
+      "held-out wording requires an explicit evaluation split"
   let manifest = parseFile(manifestPath)
   var variantConfig = newJNull()
   for entry in manifest["variants"]:
@@ -121,17 +137,27 @@ proc reset(request: JsonNode, manifestPath: string): JsonNode =
 proc teacher(): JsonNode =
   let seat = seats[cursor]
   let chosen = scriptedDecision(game, seat, skMiner, game.inMeeting)
+  if languageMode:
+    return %*{"response": $chosen.decisionAction(game.config.chat)}
   %*{"response": $(%*{"strategy": "miner",
     "vote": (if game.inMeeting and chosen.vote.len > 0:
       chosen.vote else: "skip")})}
 
 proc step(request: JsonNode): JsonNode =
   doAssert request["decision_id"].getInt() == decisionId
-  let action = parseJson(request["response"].getStr())
-  for head in heads(seats[cursor]):
-    let name = head["name"].getStr()
-    doAssert action[name] in head["choices"], "action is masked: " & name
-  actions[seats[cursor]] = action
+  let seat = seats[cursor]
+  var action: JsonNode
+  if languageMode:
+    decisions[seat] = game.parseReply(seat,
+      extractJsonObject(request["response"].getStr()))
+    decisions[seat].source = dsExternal
+    action = decisions[seat].decisionAction(game.config.chat)
+  else:
+    action = parseJson(request["response"].getStr())
+    for head in heads(seat):
+      let name = head["name"].getStr()
+      doAssert action[name] in head["choices"], "action is masked: " & name
+  actions[seat] = action
   inc cursor
   inc decisionId
   if cursor == seats.len:
@@ -139,6 +165,9 @@ proc step(request: JsonNode): JsonNode =
         seq[Decision] {.closure.} =
       doAssert active == seats and at == cause
       for seat in active:
+        if languageMode:
+          result.add(decisions[seat])
+          continue
         let action = actions[seat]
         let kind = if action["strategy"].getStr() == "miner":
           skMiner else: skLurker
@@ -164,8 +193,11 @@ proc step(request: JsonNode): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len != 2:
-    quit("usage: hidden-agenda-train-bridge MANIFEST VARIANT", 1)
+  if args.len notin 2 .. 3:
+    quit("usage: hidden-agenda-train-bridge MANIFEST VARIANT [--language]", 1)
+  if args.len == 3:
+    doAssert args[2] == "--language"
+    languageMode = true
   let manifestPath = absolutePath(args[0])
   variant = args[1]
   doAssert variant in Variants

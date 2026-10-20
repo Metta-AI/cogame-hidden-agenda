@@ -7,7 +7,7 @@
 import std/[json, strutils, unicode]
 import curly
 import support/helpers
-import hidden_agenda/[sim_types, sim_config, sim_state, sim, llm]
+import hidden_agenda/[sim_types, sim_config, sim_state, sim, llm, prompts]
 
 template check(condition: bool, message: string) =
   if not condition:
@@ -225,7 +225,7 @@ block oneBatchCarriesEveryEligibleSeat:
   proc sleeper(seconds: float) {.closure.} =
     slept += seconds
     now += seconds
-  let driver = newDecisionDriver(client, sim.config, prompts, kinds, clock,
+  let driver = newDecisionDriver(client, sim.config, prompts, kinds, PromptSelection(), clock,
     sleeper)
   var seats = sim.activeSeats()
   check(seats.len == Seats, "five seats at the opening")
@@ -256,7 +256,7 @@ block minBatchSecondsFloorsTheSpacing:
   var now = 0.0
   proc clock(): float {.closure.} = now
   proc sleeper(seconds: float) {.closure.} = now += seconds
-  let driver = newDecisionDriver(client, config, prompts, kinds, clock, sleeper)
+  let driver = newDecisionDriver(client, config, prompts, kinds, PromptSelection(), clock, sleeper)
   let seats = sim.activeSeats()
   discard driver.decide(sim, seats, "opening")
   let first = now
@@ -278,7 +278,7 @@ block maxDecisionBatchesCaps:
     kinds.add(skNone)
   proc clock(): float {.closure.} = 0.0
   proc sleeper(seconds: float) {.closure.} = discard
-  let driver = newDecisionDriver(client, config, prompts, kinds, clock, sleeper)
+  let driver = newDecisionDriver(client, config, prompts, kinds, PromptSelection(), clock, sleeper)
   let seats = sim.activeSeats()
   for round in 0 ..< 3:
     discard driver.decide(sim, seats, "meeting")
@@ -378,7 +378,7 @@ block theRetryBatchAndTheFallbackAreDriven:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening", PromptSelection())
     check(batches == 2, "a first-attempt failure issues exactly ONE more " &
       "batch, got " & $batches)
     check(sawHint, "and the retry batch carries the retry hint")
@@ -406,7 +406,7 @@ block theRetryBatchAndTheFallbackAreDriven:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening", PromptSelection())
     check(batches == 2, "a 429 is retried once and then given up on, got " &
       $batches & " batches")
     for decision in decisions:
@@ -431,12 +431,12 @@ block theRetryBatchAndTheFallbackAreDriven:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    var decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    var decisions = client.decideAll(sim, seats, prompts, kinds, "opening", PromptSelection())
     check(batches == 1, "a 403 stops the ladder inside the first batch")
     check(client.disabled, "and disables the client")
     for decision in decisions:
       check(decision.source == dsFallback, "every seat falls back")
-    decisions = client.decideAll(sim, seats, prompts, kinds, "meeting")
+    decisions = client.decideAll(sim, seats, prompts, kinds, "meeting", PromptSelection())
     check(batches == 1, "a disabled client never issues another batch")
     for decision in decisions:
       check(decision.source == dsFallback, "and every later seat is scripted")
@@ -457,7 +457,7 @@ block theRetryBatchAndTheFallbackAreDriven:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening", PromptSelection())
     check(batches == 2, "junk is retried once")
     for decision in decisions:
       check(decision.source == dsFallback,
@@ -485,7 +485,7 @@ block theRetryBatchAndTheFallbackAreDriven:
       prompts.add("play well")
       kinds.add(skNone)
     let seats = sim.activeSeats()
-    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening")
+    let decisions = client.decideAll(sim, seats, prompts, kinds, "opening", PromptSelection())
     check(sizes == @[Seats, Seats - 1],
       "the retry batch carries only the seats that failed, got " & $sizes)
     check(decisions[0].source == dsLlm,

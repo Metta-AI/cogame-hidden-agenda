@@ -158,6 +158,7 @@ jobs:
         run: |
           nim c -d:release --path:src -o:/tmp/hidden-agenda-train-bridge tools/train_bridge.nim
           python3 tools/test_train_bridge.py /tmp/hidden-agenda-train-bridge
+          python3 tools/test_prompt_games.py /tmp/hidden-agenda-train-bridge
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

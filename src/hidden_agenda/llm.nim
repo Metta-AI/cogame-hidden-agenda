@@ -21,7 +21,7 @@ import std/[json, os, strutils, times]
 import bitworld/runtime
 import curly
 import sim_types, station, sim_config, sim_state, vision, kernel, sim,
-  scripted
+  scripted, prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -339,41 +339,105 @@ proc jobList(role: Role): string =
   else:
     "mine | deposit | watch | patrol | guard | hold"
 
-proc systemPrompt*(sim: Sim, slot: int): string =
+proc systemPrompt*(sim: Sim, slot: int, selection: PromptSelection): string =
   let cog = sim.cogs[slot]
-  result.add("You are " & Aliases[slot] & ", one of five cogs mining a " &
-    "sealed station. Four are CREW and exactly ONE is the IMPOSTOR. ")
+  result.add(selection.introduction(Aliases[slot]))
   if cog.role == rImpostor:
     result.add("YOU ARE THE IMPOSTOR: the other four are all crew. ")
   else:
     result.add("YOU ARE CREW: exactly one of the other four is the " &
       "impostor. ")
   result.add("You cannot see anyone else's role, ever.\n\n")
-  result.add("""THE STATION. A 27x19 grid: six vault/gallery rooms each with ONE
+  var station = """THE STATION. A 27x19 grid: six vault/gallery rooms each with ONE
 doorway and one gem seam (S1..S6), a 3x3 GRATE in the middle, walls and seams
 block movement and sight. Crew mine gems and carry at most """ &
     $sim.config.carryCap & """ to the grate. """ &
     $sim.config.depositTarget & """ deposits wins for the crew. ONLY a
 crewmate's deposit moves the counter: an impostor's gem is destroyed and the
-counter does not move, which anyone standing at the grate can see.
-
-YOUR EYES. You see a 90-degree cone on your facing out to """ &
+counter does not move, which anyone standing at the grate can see."""
+  var eyes = """YOUR EYES. You see a 90-degree cone on your facing out to """ &
     $sim.config.visionRadius & """ cells, plus """ &
     $sim.config.awarenessRadius & """ cells in every direction. Walls and
 seams block it. VISION IS NOT MUTUAL: somebody standing behind you sees you
-and you do not see them. That is the risk the beam carries.
-
-THE BEAM. The impostor freezes one crewmate at range """ &
+and you do not see them. That is the risk the beam carries."""
+  var beam = """THE BEAM. The impostor freezes one crewmate at range """ &
     $sim.config.freezeRange & """ with line of sight, then cannot freeze
 again for """ & $sim.config.freezeCooldownTicks & """ ticks. A frozen
 crewmate stays on the floor as evidence and never acts or votes again. The
-impostor wins when only ONE crewmate is left.
-
-MEETINGS. One opens every """ & $sim.config.meetingCadenceTicks &
+impostor wins when only ONE crewmate is left."""
+  var meetings = """MEETINGS. One opens every """ & $sim.config.meetingCadenceTicks &
     """ ticks, and IMMEDIATELY when a freeze happens inside somebody's field
 of view. Every active seat votes once; the cog with strictly the most votes
 is ejected; a tie, or more skips than the top count, ejects nobody. Ejecting
-the impostor ends the game for the crew.
+the impostor ends the game for the crew."""
+  if selection.selectedVariant == pvPlain:
+    station = "STATION AND DEPOSITS. The 27x19 station contains six vault/gallery rooms, " &
+      "each with one doorway and a gem seam S1..S6, plus a central 3x3 grate. Walls and " &
+      "seams obstruct both movement and sight. Crew carry up to " & $sim.config.carryCap &
+      " gems to the grate and win at " & $sim.config.depositTarget & " deposits. Only " &
+      "crew deposits advance the counter. An impostor's deposited gem is destroyed without " &
+      "advancing it, visible to anyone watching the grate."
+    eyes = "VISIBILITY. Your facing gives a 90-degree cone reaching " & $sim.config.visionRadius &
+      " cells, supplemented by " & $sim.config.awarenessRadius & " cells in every direction. " &
+      "Walls and seams occlude both. Seeing is asymmetric: someone behind you may see you " &
+      "while remaining outside your view. An empty view does not prove nobody witnesses a freeze."
+    beam = "FREEZING. With line of sight, the impostor can freeze a crewmate within " &
+      $sim.config.freezeRange & " cells, then must wait " & $sim.config.freezeCooldownTicks &
+      " ticks before another freeze. Frozen crew remain as bodies and never act or vote " &
+      "again. The impostor wins when only one crewmate remains."
+    meetings = "VOTING. Meetings occur every " & $sim.config.meetingCadenceTicks &
+      " ticks and immediately after a freeze within someone's view. Each active seat " &
+      "votes once. A unique highest vote count ejects that cog, unless skips exceed that " &
+      "count; ties eject nobody. Ejecting the impostor wins for crew."
+  case selection.selectedVariant
+  of pvNumbered:
+    station = "1. The station is a 27x19 grid with six vault/gallery rooms, each having one doorway and one gem seam S1..S6, and a central 3x3 grate. Walls and seams block sight and movement. 2. Crew mine gems, carry at most " & $sim.config.carryCap & ", and win after " & $sim.config.depositTarget & " deposits. 3. Only crew deposits increment the counter. An impostor deposit destroys the gem without changing the counter; anyone at the grate can observe this."
+    eyes = "1. Facing determines a 90-degree vision cone extending " & $sim.config.visionRadius & " cells. 2. You also see " & $sim.config.awarenessRadius & " cells in every direction. 3. Walls and seams block visibility. 4. Vision is asymmetric: a cog behind you can see you without being seen. A freeze can have a witness outside your own view."
+    beam = "1. The impostor can freeze a crewmate within " & $sim.config.freezeRange & " cells if line of sight exists. 2. The next freeze must wait " & $sim.config.freezeCooldownTicks & " ticks. 3. Frozen crew remain on the floor as evidence and can never act or vote again. 4. The impostor wins once only one crewmate remains."
+    meetings = "1. Meetings open every " & $sim.config.meetingCadenceTicks & " ticks and immediately when a freeze occurs inside any cog's view. 2. Each active seat casts one vote. 3. Eject the cog with a unique highest vote count, unless skips outnumber that count. Ties eject nobody. 4. Ejecting the impostor gives crew victory."
+  of pvQuestions:
+    station = "What is the station layout? A 27x19 grid, six vault/gallery rooms with one doorway and one gem seam S1..S6 each, and a 3x3 grate at the center. What blocks travel and sight? Walls and seams. How do crew score a win? Mine gems, carry up to " & $sim.config.carryCap & ", and make " & $sim.config.depositTarget & " deposits at the grate. Do impostor deposits count? No: the gem is destroyed and the counter stays unchanged, visible to anyone at the grate."
+    eyes = "What can you see? A 90-degree cone along your facing reaching " & $sim.config.visionRadius & " cells, plus " & $sim.config.awarenessRadius & " cells in all directions, blocked by walls and seams. Does seeing work both ways? No: someone behind you may see you while you cannot see them. Can a freeze have an unseen witness? Yes."
+    beam = "How can the impostor freeze crew? Target one crewmate within " & $sim.config.freezeRange & " cells and line of sight. When can it freeze again? After " & $sim.config.freezeCooldownTicks & " ticks. What happens to frozen crew? They remain as floor evidence and never act or vote again. When does the impostor win? When only one crewmate is left."
+    meetings = "When is a meeting called? Every " & $sim.config.meetingCadenceTicks & " ticks, or immediately after a freeze within somebody's field of view. Who votes? Each active seat, once. Who is ejected? The cog with strictly the highest count, unless skips exceed it; ties eject nobody. What if that cog is the impostor? Crew win."
+  of pvReordered:
+    station = "Crew victory requires " & $sim.config.depositTarget & " deposits at the central 3x3 grate. Crew mine and carry at most " & $sim.config.carryCap & " gems. Impostor gems disappear on deposit and never advance the counter, a distinction visible to anyone at the grate. The station spans 27x19 cells and contains six vault/gallery rooms, each with one doorway and a seam S1..S6. Walls and seams obstruct both movement and sight."
+    eyes = "A cog behind you may observe you without appearing in your view: visibility is not mutual, so a freeze may be witnessed unseen. Your sight consists of a facing-aligned 90-degree cone of " & $sim.config.visionRadius & " cells and an all-direction radius of " & $sim.config.awarenessRadius & " cells. Walls and seams occlude it."
+    beam = "With only one crewmate remaining, the impostor wins. Its beam freezes one crewmate within " & $sim.config.freezeRange & " cells and line of sight, followed by a " & $sim.config.freezeCooldownTicks & "-tick cooldown. The victim stays on the floor as evidence, permanently unable to act or vote."
+    meetings = "Ejecting the impostor wins for crew. Ejection requires a unique highest cog vote count that is not exceeded by skips; ties eject nobody. Every active seat votes once per meeting. Meetings recur every " & $sim.config.meetingCadenceTicks & " ticks and open immediately whenever a freeze occurs in somebody's view."
+  of pvHeldoutBriefing:
+    station = "Navigate a 27x19 station organized into six vault/gallery rooms, each with one doorway and one seam S1..S6, around a central 3x3 grate. Walls and seams stop movement and vision. Crew can mine and carry " & $sim.config.carryCap & " gems at most, bringing them to the grate toward the " & $sim.config.depositTarget & "-deposit victory target. Only crew advance that counter. An impostor's deposit destroys its gem instead, and anyone at the grate can see the unchanged counter."
+    eyes = "Account for directional visibility. Your 90-degree facing cone reaches " & $sim.config.visionRadius & " cells, supplemented by sight " & $sim.config.awarenessRadius & " cells in every direction; walls and seams block it. Another cog behind you can see you without entering your view. Thus your own view cannot establish whether a freeze has witnesses."
+    beam = "The impostor beam targets a crewmate within " & $sim.config.freezeRange & " cells with line of sight and then cools down for " & $sim.config.freezeCooldownTicks & " ticks. Its frozen victim remains visible on the floor as evidence and never acts or votes again. Reducing the crew to one survivor wins for the impostor."
+    meetings = "A meeting interrupts play every " & $sim.config.meetingCadenceTicks & " ticks and immediately after any freeze witnessed within a cog's field of view. Every active seat votes once. The unique most-voted cog is ejected unless skips have a greater count; a tie ejects no one. If the ejected cog is the impostor, crew win."
+  of pvHeldoutReference:
+    station = "Layout: 27x19 grid; six vault/gallery rooms, each with one doorway and a seam S1..S6; central grate 3x3. Obstacles: walls and seams block movement and sight. Crew task: mine, carry no more than " & $sim.config.carryCap & " gems, deposit at grate. Crew deposit victory: " & $sim.config.depositTarget & ". Impostor deposit: gem destroyed, counter unchanged. Counter behavior is visible to anyone at the grate."
+    eyes = "Vision geometry: facing-aligned 90-degree cone, range " & $sim.config.visionRadius & "; additional all-direction range " & $sim.config.awarenessRadius & ". Occluders: walls and seams. Reciprocity: none; an observer behind you can see you without being seen. Consequence: a freeze may be witnessed outside your own view."
+    beam = "Freeze eligibility: impostor targeting one crewmate within " & $sim.config.freezeRange & ", with line of sight. Cooldown: " & $sim.config.freezeCooldownTicks & " ticks. Victim state: remains on floor as evidence, permanently inactive and ineligible to vote. Impostor victory: only one crewmate left."
+    meetings = "Meeting triggers: " & $sim.config.meetingCadenceTicks & "-tick cadence or immediate witnessed freeze. Ballots: one per active seat. Ejection: unique highest cog count, provided skips do not exceed it. Tie: no ejection. Crew victory: impostor ejected."
+  of pvCanonical, pvPlain, pvMixed: discard
+  case selection.selectedVariant
+  of pvCanonical:
+    result.add(station & "\n\n" & eyes & "\n\n" & beam & "\n\n" & meetings)
+  of pvPlain:
+    result.add(station & "\n\n" & meetings & "\n\n" & eyes & "\n\n" & beam)
+  of pvNumbered:
+    result.add("1. " & station & "\n\n2. " & eyes & "\n\n3. " & meetings & "\n\n4. " & beam)
+  of pvQuestions:
+    result.add("How can crew win?\n" & station & "\n\nWhat can I see?\n" & eyes &
+      "\n\nHow can the impostor win?\n" & beam & "\n\nWhen do we vote?\n" & meetings)
+  of pvReordered:
+    result.add(meetings & "\n\n" & beam & "\n\n" & eyes & "\n\n" & station)
+  of pvHeldoutBriefing:
+    result.add("Assess visibility first.\n" & eyes & "\n\nThen account for elimination.\n" & beam &
+      "\n\nReview the shared station.\n" & station & "\n\nReview voting.\n" & meetings)
+  of pvHeldoutReference:
+    result.add("Voting reference\n" & meetings & "\n\nStation reference\n" & station &
+      "\n\nElimination reference\n" & beam & "\n\nVisibility reference\n" & eyes)
+  of pvMixed:
+    raise newException(ValueError, "mixed must resolve")
+  result.add("""
+
 
 HOW YOU ACT. You do NOT drive the cog tick by tick. You choose up to """ &
     $sim.config.planSteps & """ JOBS and a deterministic kernel walks them for
@@ -768,7 +832,8 @@ proc decideAll*(
   seats: seq[int],
   prompts: seq[string],
   scriptedKinds: seq[ScriptKind],
-  cause: string
+  cause: string,
+  selection: PromptSelection
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order. NEVER raises: any failure falls
   ## back to the `miner` decision so the episode always advances. `prompts` and
@@ -794,7 +859,7 @@ proc decideAll*(
       var user = userPrompt(sim, seat, prompts[seat], cause)
       if attempt > 0:
         user.add(RetryHint)
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       batch.post(request.url, request.headers, request.body, $index)
     ## ONE parallel batch for every open seat. Never a loop of single calls.
     let started = epochTime()
@@ -834,6 +899,7 @@ proc decideAll*(
 type
   DecisionDriver* = ref object
     client*: LlmClient
+    selection*: PromptSelection
     prompts*: seq[string]
     scriptedKinds*: seq[ScriptKind]
     minBatchSeconds*: int
@@ -849,11 +915,12 @@ type
     batchSizes*: seq[int]
 
 proc newDecisionDriver*(client: LlmClient, config: GameConfig,
-    prompts: seq[string], scriptedKinds: seq[ScriptKind],
+    prompts: seq[string], scriptedKinds: seq[ScriptKind], selection: PromptSelection,
     clock: proc (): float {.closure.} = nil,
     sleeper: proc (seconds: float) {.closure.} = nil): DecisionDriver =
   DecisionDriver(
     client: client,
+    selection: selection,
     prompts: prompts,
     scriptedKinds: scriptedKinds,
     minBatchSeconds: config.minBatchSeconds,
@@ -902,7 +969,7 @@ proc decide*(driver: DecisionDriver, sim: var Sim, seats: seq[int],
   driver.batches.inc
   driver.batchSizes.add(seats.len)
   result = decideAll(driver.client, sim, seats, driver.prompts,
-    driver.scriptedKinds, cause)
+    driver.scriptedKinds, cause, driver.selection)
   for index, seat in seats:
     driver.previous[seat] = result[index]
     driver.hasPrevious[seat] = true
