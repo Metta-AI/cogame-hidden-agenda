@@ -57,7 +57,7 @@ def play(binary, variant, wording, seed, language, prompt_seed=0, original=False
             view = observation["semantic_view"]
             if not original:
                 metadata = view.pop("prompt_template")
-                assert metadata["bank"] == "hidden-agenda-rules-v2"
+                assert metadata["bank"] == "hidden-agenda-rules-v3"
                 assert metadata["variant"] == (TRAIN[prompt_seed % 5] if wording == "mixed" else wording)
                 assert metadata["system_sha256"] == hashlib.sha256(system.encode()).hexdigest()
                 assert metadata["user_sha256"] == hashlib.sha256(user.encode()).hexdigest()

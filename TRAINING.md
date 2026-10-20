@@ -3,8 +3,9 @@
 Five training rule presentations (`canonical`, `plain`, `numbered`, `questions`,
 `reordered`) and two evaluation presentations (`heldout-briefing`,
 `heldout-reference`) vary station objectives, asymmetric visibility, freezing,
-and voting. The `hidden-agenda-rules-v2` bank keeps role assignments, job syntax,
-reply format, and sampled rule values intact. Canonical messages remain exact.
+and voting. The `hidden-agenda-rules-v3` bank keeps role assignments, job syntax,
+reply format, and sampled rule values intact. Alternatives use independently
+phrased explanations. Canonical and plain messages remain exact.
 
 `mixed` requires an independent nonnegative `promptSeed` and selects seed modulo
 five. Selection remains fixed throughout an episode. The native host and both
