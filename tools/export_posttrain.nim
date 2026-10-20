@@ -56,7 +56,7 @@ when isMainModule:
         result.add(accepted)
         rows.add($(%*{
           "episode_id": "hidden-agenda-" & variant & "-" & $seed & "-" &
-            selection.selectionMetadata()["variant"].getStr(),
+            $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed,
           "seed": "hidden-agenda-" & $seed,
           "prompt_template": selection.promptMetadata(systemPrompt(view, seat, selection), userPrompt(view, seat, "", cause)),
           "decision_id": rows.len,
