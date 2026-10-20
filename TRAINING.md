@@ -17,7 +17,9 @@ The existing exporter runs complete published games using miner/lurker teachers
 and the production reply parser. It retains train.jsonl, validation.jsonl, and
 manifest.json. Every fifth game is validation. Families use `hidden-agenda-SEED`
 across modes and wordings, preventing replicas from crossing splits. Mixed
-exports cycle wordings between games; held-out training exports are rejected.
+exports cycle wordings independently within training and validation. Episode IDs
+include wording to distinguish matched collections. Held-out training exports
+are rejected.
 
 ```sh
 nim c -d:release --path:src -o:/tmp/hidden-agenda-posttrain tools/export_posttrain.nim

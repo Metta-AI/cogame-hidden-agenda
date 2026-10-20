@@ -30,9 +30,13 @@ when isMainModule:
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
+    wordingCounts: array[2, int]
   for seed in 1 .. episodes:
     var selection = configured
-    if selection.variant == pvMixed: selection.seed += seed - 1
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+      inc wordingCounts[partition]
     variantConfig["seed"] = %seed
     var config = defaultGameConfig()
     config.update($variantConfig)
@@ -51,7 +55,8 @@ when isMainModule:
         accepted.source = dsScripted
         result.add(accepted)
         rows.add($(%*{
-          "episode_id": "hidden-agenda-" & variant & "-" & $seed,
+          "episode_id": "hidden-agenda-" & variant & "-" & $seed & "-" &
+            selection.selectionMetadata()["variant"].getStr(),
           "seed": "hidden-agenda-" & $seed,
           "prompt_template": selection.promptMetadata(systemPrompt(view, seat, selection), userPrompt(view, seat, "", cause)),
           "decision_id": rows.len,
