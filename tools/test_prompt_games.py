@@ -133,7 +133,8 @@ if __name__ == "__main__":
                     actual = play(binary, variant, "mixed", seed, language, prompt_seed)
                     assert actual[:2] == reference[:2]
                     count += 1
-    for wording in WORDINGS[5:]:
+    for wording, split in ((wording, split) for wording in WORDINGS[5:]
+                           for split in (None, "train", "typo")):
         rejected = subprocess.run(
             [
                 str(binary),
@@ -147,7 +148,7 @@ if __name__ == "__main__":
                     "players": 5,
                     "seed": "wording-1",
                     "promptVariant": wording,
-                    "split": "train",
+                    **({"split": split} if split is not None else {}),
                 }
             )
             + "\n",
@@ -155,7 +156,7 @@ if __name__ == "__main__":
             text=True,
             timeout=10,
         )
-        assert rejected.returncode != 0 and "held-out wording is evaluation only" in rejected.stderr
+        assert rejected.returncode != 0 and "held-out wording requires an explicit evaluation split" in rejected.stderr
         assert not rejected.stdout
     print(
         count,

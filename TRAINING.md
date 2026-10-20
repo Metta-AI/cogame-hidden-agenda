@@ -77,3 +77,6 @@ then reloaded checkpoints for four games on held-out seeds 101 and 102:
 
 These short pilots verify training, checkpoint reload, and evaluation. They do
 not establish competitive policies.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.
