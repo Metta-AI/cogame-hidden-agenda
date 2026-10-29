@@ -656,7 +656,8 @@ proc recordOrder*(sim: var Sim, slot: int, decision: Decision) =
     (if sim.config.chat and sim.inMeeting: sim.says[slot] else: ""),
     decision.hunch, decision.notes, $decision.source, decision.latencyMs)
 
-proc runDecisionPoint*(sim: var Sim, decide: Decider, cause: string) =
+proc runDecisionPoint*(sim: var Sim, decide: Decider, cause: string,
+    afterApplied: proc (view: var Sim, seats: seq[int], decisions: seq[Decision]) {.closure.} = nil) =
   let seats = sim.activeSeats()
   if seats.len == 0:
     return
@@ -669,6 +670,7 @@ proc runDecisionPoint*(sim: var Sim, decide: Decider, cause: string) =
     if index >= decisions.len:
       continue
     sim.recordOrder(slot, decisions[index])
+  if afterApplied != nil: afterApplied(sim, seats, decisions)
   sim.decisions.inc
 
 # ---------------------------------------------------------------------------
@@ -720,16 +722,17 @@ proc advanceEpisode*(sim: var Sim, now: Clock = nil,
       sim.settle("complete", "timeout", "none")
 
 proc runEpisode*(sim: var Sim, decide: Decider, now: Clock = nil,
-    deadlineSeconds = 0.0, onTick: proc (sim: var Sim) {.closure.} = nil) =
+    deadlineSeconds = 0.0, onTick: proc (sim: var Sim) {.closure.} = nil,
+    afterApplied: proc (view: var Sim, seats: seq[int], decisions: seq[Decision]) {.closure.} = nil) =
   ## Drives the episode to an end condition. `decide` is called at most once per
   ## decision point, with every ACTIVE seat in ONE call, so a
   ## simultaneous-decision game can batch them.
   sim.startEpisode()
-  sim.runDecisionPoint(decide, "opening")
+  sim.runDecisionPoint(decide, "opening", afterApplied)
   while not sim.done:
     let cause = sim.advanceEpisode(now, deadlineSeconds, onTick)
     if cause.len > 0:
-      sim.runDecisionPoint(decide, cause)
+      sim.runDecisionPoint(decide, cause, afterApplied)
 
 proc finalise*(sim: var Sim) =
   ## The terminal `end` row, written once the episode has settled.

@@ -21,7 +21,7 @@ import std/[json, os, strutils, times]
 import bitworld/runtime
 import curly
 import sim_types, station, sim_config, sim_state, vision, kernel, sim,
-  scripted, prompts
+  scripted, prompts, training_capture
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -58,6 +58,8 @@ type
     maxOutputTokens*: int
     timeoutSeconds*: int
     disabled*: bool
+    capture*: RuntimeCapture
+    captured*: array[Seats, CapturedDecision]
 
 proc disabledLlmClient*(): LlmClient =
   ## A client that is known to have no credentials. The production path reaches
@@ -860,6 +862,9 @@ proc decideAll*(
       if attempt > 0:
         user.add(RetryHint)
       let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
+      if client.capture != nil:
+        client.captured[seat].beginAttempt()
+        client.captured[seat].requested(request.body, request.headers)
       batch.post(request.url, request.headers, request.body, $index)
     ## ONE parallel batch for every open seat. Never a loop of single calls.
     let started = epochTime()
@@ -872,14 +877,21 @@ proc decideAll*(
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      if client.capture != nil:
+        if responses[position].error.len > 0:
+          client.captured[seat].transportFailed(responses[position].error, latency)
+        else:
+          client.captured[seat].received(responses[position].response, latency)
       try:
         let text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
+        if client.capture != nil: client.captured[seat].replyText(text)
         var decision = parseReply(sim, seat, extractJsonObject(text))
         decision.source = if attempt == 0: dsLlm else: dsRetry
         decision.latencyMs = latency
         result[index] = decision
       except CatchableError as error:
+        if client.capture != nil: client.captured[seat].rejectedAttempt(error.msg)
         echo "hidden-agenda llm: seat ", seat, " attempt ", attempt + 1,
           " failed: ", cleanText(error.msg, MaxErrorLen)
         stillOpen.add(index)

@@ -32,7 +32,7 @@ import curly
 import mummy
 import mummy/routers
 import sim_types, sim_config, sim_state, sim, scripted, llm,
-  global, replays, wire_constants, prompts
+  global, replays, wire_constants, prompts, training_capture
 
 const
   PlayerPage = staticRead("../../client/player.html")
@@ -62,6 +62,7 @@ var
   stateLock: Lock
   shared: ServerState
   gameSim: Sim
+  nativeCapture: RuntimeCapture
   gameServer: Server
   gameConfig: GameConfig
 
@@ -177,6 +178,10 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     "COGAME_RESULTS_METHOD")
   writeArtifact(runtimeConfig.replayUri, replayData, "application/json",
     "COGAME_SAVE_REPLAY_METHOD")
+  if nativeCapture != nil:
+    var captureOutcome = copy(results)
+    captureOutcome["native_config"] = replayConfigJson(gameConfig)
+    nativeCapture.finishCapture(captureOutcome)
   echo "hidden-agenda: episode complete (", gameSim.reason, "/",
     gameSim.ending, ", winner ", gameSim.winner, ") after ",
     gameSim.frames.len, " ticks, ", gameSim.deposits, " deposits, ",
@@ -241,6 +246,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       prompts = shared.prompts
       kinds = shared.scriptedKinds
     let client = newLlmClient(config)
+    nativeCapture = newRuntimeCapture(config, runtimeConfig.resultsUri, runtimeConfig.replayUri)
+    client.capture = nativeCapture
     proc clock(): float {.closure.} = epochTime() - gameStart
     proc sleeper(seconds: float) {.closure.} =
       sleep(int(seconds * 1000.0))
@@ -273,6 +280,12 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               shared.playerSockets[seat].send($ %*{
                 "type": "observation", "id": decisionId,
                 "observation": seatView(view, seat, cause)})
+      if nativeCapture != nil:
+        for seat in seats:
+          let observation = seatView(view, seat, cause)
+          client.captured[seat] = nativeCapture.beginDecision("decision-" & $view.decisions & "-seat-" & $seat,
+            "native-seat-" & $seat, observation, %*{"bank": "hidden-agenda-rules-v3",
+              "variant": $selection.selectedVariant}, nativeStateHash(observation))
       result = driver.decide(view, seats, cause)
       if requestExternal:
         let started = epochTime()
@@ -304,7 +317,25 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         withLock stateLock:
           refreshSnapshotLocked()
 
-    gameSim.runEpisode(decide, clock, playDeadlineSeconds(config), onTick)
+    proc afterApplied(view: var Sim, seats: seq[int], decisions: seq[Decision]) {.closure.} =
+      if nativeCapture == nil: return
+      try:
+        for index, seat in seats:
+          if index >= decisions.len: continue
+          var event: JsonNode
+          for row in view.log.rows:
+            if row{"k"}.getStr() == "order" and row{"decision"}.getInt(-1) == view.decisions and row{"seat"}.getInt(-1) == seat:
+              event = row
+          if event == nil: raise newException(ValueError, "native installed order missing")
+          var actual = newJObject()
+          for key in ["plan", "vote", "switch", "say", "hunch", "notes"]:
+            actual[key] = copy(event[key])
+          nativeCapture.applied(client.captured[seat], seat, actual, event,
+            $decisions[index].source, nativeStateHash(seatView(view, seat, "after-applied")))
+      except CatchableError as error:
+        nativeCapture.captureError("after-applied capture failed: " & error.msg)
+
+    gameSim.runEpisode(decide, clock, playDeadlineSeconds(config), onTick, afterApplied)
     withLock stateLock:
       pushStateFrames("final")
     finishEpisode(runtimeConfig)
@@ -370,6 +401,11 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       return
     let websocket = request.upgradeToWebSocket()
     withLock stateLock:
+      # The upgrade runs outside stateLock: another accepted request can
+      # claim this slot while the handshake is in flight.
+      if shared.playerSockets.hasKey(slot):
+        websocket.close()
+        return
       shared.playerSockets[slot] = websocket
       shared.socketSlots[websocket] = slot
       echo "hidden-agenda: player slot ", slot, " connected (",
@@ -416,12 +452,16 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           if payload["control"].getStr() != "external":
             raise newException(HiddenAgendaError, "unknown player control")
           withLock stateLock:
+            if shared.playerSockets.getOrDefault(slot) != websocket:
+              return
             shared.external[slot] = true
             shared.registered[slot] = true
             shared.everRegistered[slot] = true
           return
         if payload{"type"}.getStr() == "action":
           withLock stateLock:
+            if shared.playerSockets.getOrDefault(slot) != websocket:
+              return
             if shared.external[slot] and payload["id"].getInt() ==
                 shared.decisionId and shared.pendingActions[slot].isNil:
               let action = payload["action"]
@@ -443,6 +483,8 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
         if prompt.strip().len == 0 and kind == skNone:
           kind = skMiner
         withLock stateLock:
+          if shared.playerSockets.getOrDefault(slot) != websocket:
+            return
           shared.prompts[slot] = prompt
           shared.scriptedKinds[slot] = kind
           shared.external[slot] = false
@@ -462,10 +504,10 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           shared.socketSlots.del(websocket)
           if shared.playerSockets.getOrDefault(slot) == websocket:
             shared.playerSockets.del(slot)
-          ## A seat whose socket dies mid-episode plays `miner` for the rest
-          ## of it; the episode never blocks on a socket.
-          if shared.scriptedKinds[slot] == skNone:
-            shared.scriptedKinds[slot] = skMiner
+            ## Only the current owner's close may demote this seat. An old
+            ## socket must not change a replacement's control strategy.
+            if shared.scriptedKinds[slot] == skNone:
+              shared.scriptedKinds[slot] = skMiner
         shared.globalSockets.excl(websocket)
 
 proc buildRouter(): Router =

@@ -6,10 +6,10 @@ evidence and never act again. A meeting fires every 200 ticks — **and instantl
 when a freeze happens inside somebody's field of view**. In the no-talk variant
 the only channel anybody has is a visible, changeable vote.
 
-* **Seats:** 5 (4 crew + 1 impostor), zero-sum: `+1 ×4 / −4`, or `−1 ×4 / +4`.
-* **Crew win** at 32 deposits, or by ejecting the impostor.
-* **Impostor wins** when only one crewmate is left. Tick 3000 is a 0-0 tie.
-* **Prompt and scripted policies share one image.** `PLAYER_PROMPT="<strategy>"`
+- **Seats:** 5 (4 crew + 1 impostor), zero-sum: `+1 ×4 / −4`, or `−1 ×4 / +4`.
+- **Crew win** at 32 deposits, or by ejecting the impostor.
+- **Impostor wins** when only one crewmate is left. Tick 3000 is a 0-0 tie.
+- **Prompt and scripted policies share one image.** `PLAYER_PROMPT="<strategy>"`
   fields an LLM policy; `PLAYER_SCRIPTED=miner|lurker` fields a scripted baseline.
 
 Watch it: <https://softmax.com/hidden-agenda>
@@ -37,11 +37,14 @@ opening and every meeting open — you choose **up to three jobs**, and a
 deterministic kernel walks them for you until the next meeting.
 
 ```json
-{"plan":[{"job":"mine","at":"S5"},{"job":"deposit"},{"job":"watch","who":"PINK"}],
- "vote":"PINK","switch":{"if":"YELLOW","to":"PINK"},
- "say":"pink was standing over green in the south gallery",
- "hunch":"pink froze green at 806 and I saw it",
- "notes":"red has been in NW since 640"}
+{
+  "plan": [{ "job": "mine", "at": "S5" }, { "job": "deposit" }, { "job": "watch", "who": "PINK" }],
+  "vote": "PINK",
+  "switch": { "if": "YELLOW", "to": "PINK" },
+  "say": "pink was standing over green in the south gallery",
+  "hunch": "pink froze green at 806 and I saw it",
+  "notes": "red has been in NW since 640"
+}
 ```
 
 Crew jobs: `mine at:<seam>` `deposit` `watch who:<alias>` `patrol room:<room>`
@@ -56,18 +59,18 @@ Post-training from native games: [TRAINING.md](TRAINING.md).
 
 ## Layout
 
-| path | what |
-|---|---|
-| `src/hidden_agenda.nim` | entrypoint; the seed is randomised HERE, before `config.update` |
-| `src/hidden_agenda/` | the sim module: `sim_types` `station` `vision` `kernel` `meeting` `sim` `scripted` `llm` `replays` `broadcast` `global` `server` |
-| `src/hidden_agenda_player.nim` | the thin policy selector (`/bin/hidden-agenda-player`) |
-| `client/` | `chrome_common.js` (byte-identical to the starter's), `broadcast_core.js` (the board renderer), `replay_broadcast.html` (the starter's page + this game's block) |
-| `replay-viewer/` | the wasm entry point and the static bundle's JS shell |
-| `data/maps/vault.txt` | THE map. 27 × 19 ASCII, the specification not an illustration |
-| `data/art/` | the board art: nano-banana cog kits + the procedural station tiles |
-| `scripts/art/` | the art generators and the committed nano-banana source sheets |
-| `tests/` | thirteen test programs; CI runs each twice, debug and release |
-| `tools/ci/` | the docker smoke, the viewer smoke, the renderer fixture, the policy set |
+| path                           | what                                                                                                                                                             |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/hidden_agenda.nim`        | entrypoint; the seed is randomised HERE, before `config.update`                                                                                                  |
+| `src/hidden_agenda/`           | the sim module: `sim_types` `station` `vision` `kernel` `meeting` `sim` `scripted` `llm` `replays` `broadcast` `global` `server`                                 |
+| `src/hidden_agenda_player.nim` | the thin policy selector (`/bin/hidden-agenda-player`)                                                                                                           |
+| `client/`                      | `chrome_common.js` (byte-identical to the starter's), `broadcast_core.js` (the board renderer), `replay_broadcast.html` (the starter's page + this game's block) |
+| `replay-viewer/`               | the wasm entry point and the static bundle's JS shell                                                                                                            |
+| `data/maps/vault.txt`          | THE map. 27 × 19 ASCII, the specification not an illustration                                                                                                    |
+| `data/art/`                    | the board art: nano-banana cog kits + the procedural station tiles                                                                                               |
+| `scripts/art/`                 | the art generators and the committed nano-banana source sheets                                                                                                   |
+| `tests/`                       | thirteen test programs; CI runs each twice, debug and release                                                                                                    |
+| `tools/ci/`                    | the docker smoke, the viewer smoke, the renderer fixture, the policy set                                                                                         |
 
 ## Generated files
 
@@ -114,3 +117,40 @@ Every string that reaches the replay, the results or another seat goes through
 by byte index: a byte-truncated multi-byte character renders fine in a browser
 and then fails a strict JSON parser, which is how a hosted replay becomes
 unreadable.
+
+## Native socket ownership checks
+
+A player socket may register a prompt, choose external control, or submit an
+external action only while it owns that slot. The server rechecks vacancy after
+the WebSocket upgrade and closes a losing concurrent newcomer. Closing an old
+socket cannot change a replacement's policy; closing the current model socket
+keeps the existing miner fallback behavior.
+
+The maintained loopback fixture accepts short component cases:
+
+```bash
+python tools/native_capture_fixture.py /path/to/hidden-agenda /tmp/ownership-legit --mode on --ownership-case legit
+python tools/native_capture_fixture.py /path/to/hidden-agenda /tmp/ownership-race --mode on --ownership-case race --race-pairs 10
+nim c --threads:on --path:src -o:/tmp/check-native-replay tools/check_native_replay.nim
+/tmp/check-native-replay /tmp/ownership-legit
+```
+
+Use a fresh output directory for every fixture invocation. The other ownership
+cases are `missing`, `silent`, `malformed`, `disconnect`, and `external`. These
+use the production config parser with a 600-tick maximum and short component
+clocks. They do not establish ordinary 3,000-tick hosted behavior. The replay
+checker parses installed actions against production state and re-simulates
+frames, events and outcomes; synthetic HTTP IDs establish no authentic teacher
+or learning result.
+
+The local source-bound baseline reproduced two welcome frames for one slot in
+a paired collision. After the ownership guards, ten paired collisions admitted
+at most one welcomed owner each, and all seven short component cases completed.
+Raw request/view/action/outcome joins and native replay reconstruction passed;
+forged seat, UUID, action, state hash, outcome and replay-frame evidence was
+rejected. Existing failure artifacts are retained privately with the exact
+commands and source identities.
+
+Stale message/close interleavings were not separately scheduled. The disconnect
+case includes a possibly in-flight request and does not establish zero model
+requests at a later eligible decision. These are remaining coverage gaps.
