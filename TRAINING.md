@@ -70,14 +70,52 @@ Metta RL completed 512 timesteps on each certified variant through the
 numeric bridge. Native PufferLib trained 4,096 CUDA timesteps per variant,
 then reloaded checkpoints for four games on held-out seeds 101 and 102:
 
-| Variant | Seed 101 score / performance | Seed 102 score / performance | Checkpoint SHA-256 |
-| --- | --- | --- | --- |
-| hidden-agenda | 0 / 0.5 | 0.75 / 0.59375 | `38c0bc3d454f0b9a0fc4c1dac606546aa88bb972b5c6969bb5fb6ffab285a255` |
-| hidden-agenda-notalk | -0.5 / 0.4375 | 0.75 / 0.59375 | `a74c20942c29f869cfaba27a6449df20fb8e6c2966eda4baf269c254027cd9f2` |
-| hidden-agenda-blind | -0.333333 / 0.458333 | 0.285714 / 0.535714 | `7a924e7499fbbd436122817eeb450b29fef23a6b47248a31010f46e2183c6505` |
+| Variant              | Seed 101 score / performance | Seed 102 score / performance | Checkpoint SHA-256                                                 |
+| -------------------- | ---------------------------- | ---------------------------- | ------------------------------------------------------------------ |
+| hidden-agenda        | 0 / 0.5                      | 0.75 / 0.59375               | `38c0bc3d454f0b9a0fc4c1dac606546aa88bb972b5c6969bb5fb6ffab285a255` |
+| hidden-agenda-notalk | -0.5 / 0.4375                | 0.75 / 0.59375               | `a74c20942c29f869cfaba27a6449df20fb8e6c2966eda4baf269c254027cd9f2` |
+| hidden-agenda-blind  | -0.333333 / 0.458333         | 0.285714 / 0.535714          | `7a924e7499fbbd436122817eeb450b29fef23a6b47248a31010f46e2183c6505` |
 
 These short pilots verify training, checkpoint reload, and evaluation. They do
 not establish competitive policies.
 
 Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
 split. Omitted, training, and unrecognized splits reject them.
+
+## Native hosted private evidence
+
+Set `COGAME_SAVE_TRAJECTORY_URI` to a separate private file/upload destination,
+with `COWORLD_EPISODE_ID`, `COWORLD_GAME_VERSION` and
+`COWORLD_SOURCE_REVISION` supplied by the launcher. Capture is opt-in; omitting
+the URI retains ordinary behavior and emits no trajectory. Public replay and
+results destinations cannot double as the private destination. Capture/sink
+failures are logged explicitly and never prevent public completion.
+
+The ordinary central adapter still sends one simultaneous batch for all active
+seats, with the same retries, pacing, budget, tolerant parser and fallback.
+Each actor view is frozen before any current decision applies. A native callback
+records each seat's actual `recordOrder` only after every seat has applied and
+recorded its order. Private evidence retains original request/response bytes,
+safe request headers, private response headers, call IDs, usage and retry history.
+Latency belongs to the whole batch; unavailable per-request latency stays null.
+No other seat's private view, role, notes or current submission enters actor
+evidence. Frozen/ejected seats are never queried; scripted, external, budget
+reuses and fallbacks cannot become model targets.
+
+Training eligibility checks strict JSON grammar/scalar text, duplicate keys,
+field types, unknown keys and every supplied value against the installed action.
+Native normalization (compact jobs/aliases, stripped or clipped text, ignored
+fields) stays legal gameplay but excludes that original completion as a target.
+No target text is repaired. Bounded private failures retain explicit gaps.
+
+Native captures conservatively group **all** seeds, roles, chat modes, horizons
+and prompt wordings under one authored vault-map family. Task/configuration
+hashes and terminal native configuration remain separate; a new seed does not
+establish an independent physical family. The older scripted exporter above
+retains its historical seed labels and is not an independent-world guarantee.
+
+The maintained `tools/native_capture_fixture.py` exercises the actual five-seat
+HTTP/WebSocket server with synthetic loopback replies. It requires the existing
+Python `websockets` dependency and never supplies authentic teacher receipts.
+Use fresh output directories; full source/config/commands and bounded diagnostics
+are required for an evidentiary run. No provider or learner is part of this test.
