@@ -401,6 +401,11 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
       return
     let websocket = request.upgradeToWebSocket()
     withLock stateLock:
+      # The upgrade runs outside stateLock: another accepted request can
+      # claim this slot while the handshake is in flight.
+      if shared.playerSockets.hasKey(slot):
+        websocket.close()
+        return
       shared.playerSockets[slot] = websocket
       shared.socketSlots[websocket] = slot
       echo "hidden-agenda: player slot ", slot, " connected (",
@@ -447,12 +452,16 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           if payload["control"].getStr() != "external":
             raise newException(HiddenAgendaError, "unknown player control")
           withLock stateLock:
+            if shared.playerSockets.getOrDefault(slot) != websocket:
+              return
             shared.external[slot] = true
             shared.registered[slot] = true
             shared.everRegistered[slot] = true
           return
         if payload{"type"}.getStr() == "action":
           withLock stateLock:
+            if shared.playerSockets.getOrDefault(slot) != websocket:
+              return
             if shared.external[slot] and payload["id"].getInt() ==
                 shared.decisionId and shared.pendingActions[slot].isNil:
               let action = payload["action"]
@@ -474,6 +483,8 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
         if prompt.strip().len == 0 and kind == skNone:
           kind = skMiner
         withLock stateLock:
+          if shared.playerSockets.getOrDefault(slot) != websocket:
+            return
           shared.prompts[slot] = prompt
           shared.scriptedKinds[slot] = kind
           shared.external[slot] = false
@@ -493,10 +504,10 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           shared.socketSlots.del(websocket)
           if shared.playerSockets.getOrDefault(slot) == websocket:
             shared.playerSockets.del(slot)
-          ## A seat whose socket dies mid-episode plays `miner` for the rest
-          ## of it; the episode never blocks on a socket.
-          if shared.scriptedKinds[slot] == skNone:
-            shared.scriptedKinds[slot] = skMiner
+            ## Only the current owner's close may demote this seat. An old
+            ## socket must not change a replacement's control strategy.
+            if shared.scriptedKinds[slot] == skNone:
+              shared.scriptedKinds[slot] = skMiner
         shared.globalSockets.excl(websocket)
 
 proc buildRouter(): Router =

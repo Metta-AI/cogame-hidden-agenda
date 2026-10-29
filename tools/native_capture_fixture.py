@@ -24,7 +24,24 @@ def main():
     parser.add_argument(
         "--mode", choices=["red", "off", "on", "mixed", "sink"], required=True
     )
+    parser.add_argument(
+        "--ownership-case",
+        choices=[
+            "missing",
+            "silent",
+            "malformed",
+            "legit",
+            "disconnect",
+            "external",
+            "race",
+        ],
+    )
+    parser.add_argument("--race-pairs", type=int, default=0)
     args = parser.parse_args()
+    assert 0 <= args.race_pairs <= 10
+    assert args.ownership_case == "race" or args.race_pairs == 0
+    assert args.ownership_case != "race" or args.race_pairs > 0
+    assert args.ownership_case is None or args.mode == "on"
     out = args.output.resolve()
     out.mkdir(exist_ok=False)
     started = time.monotonic()
@@ -111,7 +128,19 @@ def main():
         "tokens": [f"local-{s}" for s in range(5)],
         "players": [{"name": f"seat{s}"} for s in range(5)],
     }
+    if args.ownership_case:
+        # These are exact keys accepted by sim_config.update, not CLI aliases.
+        config.update(
+            maxTicks=600,
+            maxDecisionBatches=3,
+            llmTimeoutSeconds=1,
+            minBatchSeconds=1,
+            episodeTimeoutSeconds=30,
+            playerConnectTimeoutSeconds=10 if args.ownership_case == "race" else 2,
+            shutdownGraceSeconds=0,
+        )
     (out / "config.json").write_text(json.dumps(config))
+    (out / "http.json").write_text("[]")
     env = {
         k: os.environ[k] for k in ["PATH", "HOME", "TMPDIR", "LANG"] if k in os.environ
     }
@@ -147,29 +176,83 @@ def main():
             )
 
             async def seats():
-                async def play(seat):
+                async def connect(seat):
                     deadline = time.monotonic() + 10
                     while True:
                         try:
-                            ws = await websockets.connect(
+                            return await websockets.connect(
                                 f"ws://127.0.0.1:{port}/player?slot={seat}&token=local-{seat}"
                             )
-                            break
                         except OSError:
                             assert time.monotonic() < deadline
-                            await asyncio.sleep(0.05)
+                            await asyncio.sleep(0.03 if args.ownership_case else 0.05)
+
+                if args.ownership_case == "race":
+                    race = []
+                    # At most ten paired attempts here; RED+GREEN total <=20.
+                    for pair in range(args.race_pairs):
+
+                        async def contender():
+                            try:
+                                ws = await connect(0)
+                                try:
+                                    raw = await asyncio.wait_for(ws.recv(), 0.3)
+                                    return ws, json.loads(raw).get("type") == "welcome"
+                                except (
+                                    TimeoutError,
+                                    websockets.exceptions.ConnectionClosed,
+                                ):
+                                    return ws, False
+                            except websockets.exceptions.InvalidHandshake as error:
+                                # mummy emits a reason-less 409 status line.
+                                # websockets calls that InvalidMessage, not InvalidStatus.
+                                cause = error
+                                messages = []
+                                while cause is not None:
+                                    messages.append(str(cause))
+                                    cause = cause.__cause__
+                                assert any("409" in text for text in messages), messages
+                                return None, False
+
+                        both = await asyncio.gather(contender(), contender())
+                        race.append({"pair": pair, "welcomed": [x[1] for x in both]})
+                        for ws, _ in both:
+                            if ws is not None:
+                                await ws.close()
+                        await asyncio.sleep(0.02)
+                    (out / "race.json").write_text(json.dumps(race, indent=2))
+
+                async def play(seat):
+                    if args.ownership_case == "missing" and seat != 1:
+                        return
+                    ws = await connect(seat)
                     async with ws:
                         prompt = {
                             "type": "prompt",
                             "prompt": f"OPERATOR_PRIVATE_SEAT_{seat}",
                         }
-                        await ws.send(json.dumps(prompt))
+                        if args.ownership_case:
+                            if args.ownership_case == "external" and seat == 0:
+                                prompt = {"type": "register", "control": "external"}
+                            elif seat != 0 or args.ownership_case not in (
+                                "legit",
+                                "disconnect",
+                            ):
+                                prompt["scripted"] = "miner"
+                        silent = args.ownership_case == "silent"
+                        malformed = args.ownership_case == "malformed" and seat == 0
+                        if not silent:
+                            await ws.send(
+                                "{broken" if malformed else json.dumps(prompt)
+                            )
                         async for raw in ws:
                             raw = raw.decode() if isinstance(raw, bytes) else raw
                             message = json.loads(raw)
                             frames[seat].append(message)
-                            if message.get("type") == "welcome":
-                                await ws.send(json.dumps(prompt))
+                            if message.get("type") == "welcome" and not silent:
+                                await ws.send(
+                                    "{broken" if malformed else json.dumps(prompt)
+                                )
                             assert (
                                 "roles" not in message and "impostorSlot" not in message
                             )
@@ -178,10 +261,17 @@ def main():
                                 for other in range(5)
                                 if other != seat
                             )
+                            if (
+                                args.ownership_case == "disconnect"
+                                and seat == 0
+                                and calls
+                            ):
+                                await ws.close()
+                                return
                             if message.get("type") == "final":
                                 return
 
-                async with asyncio.timeout(65):
+                async with asyncio.timeout(45 if args.ownership_case else 65):
                     await asyncio.gather(*(play(s) for s in range(5)))
 
             asyncio.run(seats())
@@ -190,7 +280,38 @@ def main():
         results = json.loads((out / "results.json").read_text())
         replay = json.loads((out / "replay.json").read_text())
         assert results == replay["results"] and results["reason"] == "complete"
-        assert all(any(f.get("type") == "final" for f in group) for group in frames)
+        if args.ownership_case:
+            expected_finals = (
+                [1]
+                if args.ownership_case == "missing"
+                else [1, 2, 3, 4]
+                if args.ownership_case == "disconnect"
+                else list(range(5))
+            )
+            assert all(
+                any(f.get("type") == "final" for f in frames[seat])
+                for seat in expected_finals
+            )
+            replay_config = replay["config"]
+            for key in ("maxTicks",):
+                assert replay_config[key] == config[key], (key, replay_config)
+            if args.ownership_case in (
+                "missing",
+                "silent",
+                "malformed",
+                "external",
+                "race",
+            ):
+                assert len(calls) == 0
+            else:
+                assert calls and all(call["seat"] == 0 for call in calls)
+            if args.ownership_case == "race":
+                assert all(
+                    sum(pair["welcomed"]) <= 1
+                    for pair in json.loads((out / "race.json").read_text())
+                )
+        else:
+            assert all(any(f.get("type") == "final" for f in group) for group in frames)
         (out / "player-frames.json").write_text(json.dumps(frames))
         assert (
             sum(p.stat().st_size for p in out.rglob("*") if p.is_file()) < 8 * 1024**2
@@ -200,6 +321,7 @@ def main():
                 {
                     "status": "PASS complete native HTTP/WS fixture",
                     "mode": args.mode,
+                    "ownership_case": args.ownership_case,
                     "results": results,
                     "calls": len(calls),
                     "per_seat": per_seat,
